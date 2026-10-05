@@ -18,7 +18,7 @@ Validation was performed on Windows 11 build 26300 x64, with Codex desktop 26.92
 | Check | Status |
 | --- | --- |
 | Clean-checkout build and setup | Passed in Windows PowerShell 5.1: fresh clone, isolated dependency installation, local template generation, complete test suite, opt-in live quota read and desktop probe |
-| Offline quota parsing, error, retry, process ownership and rendering scenarios | Passed: production self-tests and 63 additional C# assertions |
+| Offline quota parsing, error, retry, process ownership and rendering scenarios | Passed: production self-tests and the offline C# suite, including the UTF-8-console transport regression |
 | Synthetic template generation and input validation | Passed: 9 Python tests |
 | C# template loader | Passed: C# 5 compilation and loading from the actual running Codex installation |
 | Synthetic matcher tests | Passed in the offline suite |

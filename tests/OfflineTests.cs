@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Media;
@@ -12,6 +14,7 @@ using CodexQuotaPet;
 internal static class OfflineTests
 {
     private static int _checks;
+    [DllImport("kernel32.dll")] private static extern IntPtr GetStdHandle(int handle);
     [STAThread]
     private static int Main(string[] args)
     {
@@ -122,9 +125,15 @@ internal static class OfflineTests
     {
         string oldExe = Environment.GetEnvironmentVariable("CODEX_QUOTA_PET_CODEX_PATH");
         string oldControl = Environment.GetEnvironmentVariable("CQP_TEST_CONTROL");
+        Encoding oldInputEncoding = Console.InputEncoding;
+        // A redirected UTF-8 console on hosted Windows runners can make the
+        // default Process.StandardInput writer emit a BOM. Exercise that exact
+        // environment: the production JSONL transport must stay BOM-free.
+        Console.InputEncoding = new UTF8Encoding(true);
         Environment.SetEnvironmentVariable("CODEX_QUOTA_PET_CODEX_PATH", executable);
         Environment.SetEnvironmentVariable("CQP_TEST_CONTROL", controlPath);
         Process unrelated = null;
+        IntPtr parentInput = GetStdHandle(-10);
         try
         {
             File.WriteAllText(controlPath, "ready");
@@ -134,45 +143,59 @@ internal static class OfflineTests
                 service.SetPetVisible(false); service.Start(); Thread.Sleep(300);
                 Require(Child(service) == null, "hidden startup does not spawn app-server");
                 service.Refresh();
-                WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "explicit hidden refresh");
+                WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "explicit hidden refresh with UTF-8 BOM console", service);
+                Require(GetStdHandle(-10) == parentInput, "initial connection restores parent input handle");
                 Require(service.Current.Windows.Count == 2, "mock dual quota windows");
                 bool weekly = false, shortWindow = false;
                 foreach (var window in service.Current.Windows) { if (window.WindowMinutes == 10080 && window.RemainingPercent == 63) weekly = true; if (window.WindowMinutes == 300 && window.RemainingPercent == 82) shortWindow = true; }
                 Require(weekly && shortWindow, "mock exact remaining values");
                 DateTime first = service.Current.LastSuccessUtc.Value;
                 service.SetPetVisible(true);
-                WaitFor(delegate { return service.Current.LastSuccessUtc > first; }, 8000, "visible immediate refresh");
+                WaitFor(delegate { return service.Current.LastSuccessUtc > first; }, 8000, "visible immediate refresh", service);
                 service.SetPetVisible(false);
 
                 File.WriteAllText(controlPath, "http-error"); service.Refresh();
-                WaitFor(delegate { return service.Current.State == "error"; }, 8000, "HTTP failure surfaces");
+                WaitFor(delegate { return service.Current.State == "error"; }, 8000, "HTTP failure surfaces", service);
                 Require(service.Current.LastSuccessUtc.HasValue, "failure retains old success timestamp");
                 File.WriteAllText(controlPath, "ready"); service.Refresh();
-                WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "HTTP recovery");
+                WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "HTTP recovery", service);
 
                 int oldPid = Child(service).Id;
                 File.WriteAllText(controlPath, "timeout"); service.Refresh();
                 Stopwatch timeout = Stopwatch.StartNew();
-                WaitFor(delegate { return service.Current.State == "error"; }, 19000, "request timeout");
+                WaitFor(delegate { return service.Current.State == "error"; }, 19000, "request timeout", service);
                 Require(timeout.Elapsed.TotalSeconds >= 14 && timeout.Elapsed.TotalSeconds < 19, "15-second timeout boundary");
                 File.WriteAllText(controlPath, "ready"); service.Refresh();
-                WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "timeout reconnect");
+                WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "timeout reconnect", service);
                 Require(Child(service).Id != oldPid, "timeout recreates owned child");
 
                 File.WriteAllText(controlPath, "login"); service.Refresh();
-                WaitFor(delegate { return service.Current.State == "login_required"; }, 8000, "login expiry");
+                WaitFor(delegate { return service.Current.State == "login_required"; }, 8000, "login expiry", service);
                 Require(!service.Current.LastSuccessUtc.HasValue, "expired account invalidates cached quota");
                 File.WriteAllText(controlPath, "ready"); service.Refresh();
-                WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "login recovery");
+                WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "login recovery", service);
 
                 Process owned = Child(service); owned.Kill();
-                WaitFor(delegate { return service.Current.State == "error"; }, 5000, "owned child exit");
+                WaitFor(delegate { return service.Current.State == "error"; }, 5000, "owned child exit", service);
                 service.Refresh();
-                WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "owned child restart");
+                WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "owned child restart", service);
                 int lastPid = Child(service).Id;
                 service.Dispose();
+                Require(GetStdHandle(-10) == parentInput, "disposal preserves parent input handle");
                 Require(!IsAlive(lastPid), "dispose closes owned child");
                 Require(!unrelated.HasExited, "unrelated app-server remains alive");
+            }
+            // Existing but invalid executable passes discovery and fails inside
+            // Process.Start, after the temporary standard-handle swap.
+            string invalidExecutable = Path.Combine(Path.GetDirectoryName(controlPath), "InvalidAppServer.exe");
+            File.WriteAllText(invalidExecutable, "Synthetic invalid executable for startup-failure testing.");
+            Environment.SetEnvironmentVariable("CODEX_QUOTA_PET_CODEX_PATH", invalidExecutable);
+            using (var failedStart = new QuotaService())
+            {
+                failedStart.SetPetVisible(false); failedStart.Start(); failedStart.Refresh();
+                WaitFor(delegate { return failedStart.Current.State == "error"; }, 8000, "invalid executable startup fails", failedStart);
+                Require(GetStdHandle(-10) == parentInput, "failed startup restores parent input handle");
+                Require(typeof(QuotaService).GetField("_input", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(failedStart) == null, "failed startup releases owned input pipe");
             }
         }
         finally
@@ -180,17 +203,28 @@ internal static class OfflineTests
             if (unrelated != null) { if (!unrelated.HasExited) unrelated.Kill(); unrelated.Dispose(); }
             Environment.SetEnvironmentVariable("CODEX_QUOTA_PET_CODEX_PATH", oldExe);
             Environment.SetEnvironmentVariable("CQP_TEST_CONTROL", oldControl);
+            Console.InputEncoding = oldInputEncoding;
         }
         Console.WriteLine("PASS mock transport timeout, HTTP failure, reconnect, login expiry, owned-process cleanup");
     }
 
     private static Process Child(QuotaService service) { return (Process)typeof(QuotaService).GetField("_process", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(service); }
     private static bool IsAlive(int pid) { try { using (var p = Process.GetProcessById(pid)) return !p.HasExited; } catch (ArgumentException) { return false; } }
-    private static void WaitFor(Func<bool> predicate, int milliseconds, string name)
+    private static void WaitFor(Func<bool> predicate, int milliseconds, string name, QuotaService service = null)
     {
         var timer = Stopwatch.StartNew();
         while (!predicate() && timer.ElapsedMilliseconds < milliseconds) Thread.Sleep(25);
-        Require(predicate(), name);
+        bool passed = predicate();
+        if (!passed && service != null)
+        {
+            // Only safe service state and process liveness: no protocol payloads,
+            // environment values, local paths, or account metadata in CI logs.
+            QuotaSnapshot state = service.Current;
+            bool childAlive = false;
+            try { Process child = Child(service); childAlive = child != null && !child.HasExited; } catch (InvalidOperationException) { }
+            name += " [state=" + state.State + ", error=" + (state.Error ?? "none") + ", childAlive=" + childAlive + ", elapsedMs=" + timer.ElapsedMilliseconds + "]";
+        }
+        Require(passed, name);
     }
     private static void Require(bool value, string description) { _checks++; if (!value) throw new InvalidOperationException(description); }
 }

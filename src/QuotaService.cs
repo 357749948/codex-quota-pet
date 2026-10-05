@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -32,6 +34,9 @@ namespace CodexQuotaPet
     public sealed class QuotaService : IDisposable
     {
         private const int RequestTimeoutSeconds = 15;
+        private static readonly object ProcessStartHandleGate = new object();
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr GetStdHandle(int handle);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern bool SetStdHandle(int handle, IntPtr value);
         private readonly object _gate = new object();
         private readonly Queue<string> _incoming = new Queue<string>();
         private readonly AutoResetEvent _wake = new AutoResetEvent(false);
@@ -39,6 +44,7 @@ namespace CodexQuotaPet
         private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
         private Thread _worker;
         private Process _process;
+        private Stream _input;
         private bool _started;
         private volatile bool _disposed;
         private bool _petVisible = true;
@@ -221,7 +227,7 @@ namespace CodexQuotaPet
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
-                RedirectStandardInput = true,
+                RedirectStandardInput = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 StandardOutputEncoding = Encoding.UTF8,
@@ -243,7 +249,28 @@ namespace CodexQuotaPet
             _process = child;
             try
             {
-                if (!child.Start()) throw new InvalidOperationException();
+                // Framework's redirected stdin writer may emit a console-derived
+                // BOM during Start, before our first write. Supply an owned byte
+                // pipe instead. The child inherits its read handle; the parent's
+                // original handle is restored immediately, including on failure.
+                var input = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.Inheritable);
+                _input = input;
+                lock (ProcessStartHandleGate)
+                {
+                    IntPtr original = GetStdHandle(-10);
+                    bool changed = false;
+                    try
+                    {
+                        if (!SetStdHandle(-10, input.ClientSafePipeHandle.DangerousGetHandle())) throw new IOException("Cannot provide child input pipe.");
+                        changed = true;
+                        if (!child.Start()) throw new InvalidOperationException();
+                    }
+                    finally
+                    {
+                        try { if (changed && !SetStdHandle(-10, original)) throw new IOException("Cannot restore parent input handle."); }
+                        finally { input.DisposeLocalCopyOfClientHandle(); }
+                    }
+                }
                 child.BeginOutputReadLine();
                 child.BeginErrorReadLine();
             }
@@ -337,8 +364,10 @@ namespace CodexQuotaPet
         {
             try
             {
-                _process.StandardInput.WriteLine(_json.Serialize(message));
-                _process.StandardInput.Flush();
+                // JSON-RPC stdio is UTF-8 without a BOM, regardless of locale.
+                byte[] bytes = Encoding.UTF8.GetBytes(_json.Serialize(message) + "\n");
+                _input.Write(bytes, 0, bytes.Length);
+                _input.Flush();
             }
             catch (Exception) { throw new SourceFailure("error", "额度连接已断开", true); }
         }
@@ -466,6 +495,10 @@ namespace CodexQuotaPet
         {
             Process child = _process;
             _process = null;
+            Stream input = _input;
+            _input = null;
+            try { if (input != null) input.Dispose(); }
+            catch (Exception) { }
             _connectionInitialized = false;
             _acceptQuotaNotifications = false;
             lock (_gate)
@@ -474,8 +507,6 @@ namespace CodexQuotaPet
                 _incoming.Clear();
             }
             if (child == null) return;
-            try { child.StandardInput.Close(); }
-            catch (Exception) { }
             try
             {
                 if (!child.WaitForExit(2000))
