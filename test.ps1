@@ -10,7 +10,7 @@ New-Item -ItemType Directory -Path $testDirectory -Force | Out-Null
 $mock = Join-Path $testDirectory 'MockAppServer.exe'
 $offline = Join-Path $testDirectory 'OfflineTests.exe'
 Invoke-CSharpBuild -Environment $environment -Sources @((Join-Path $PSScriptRoot 'tests\MockAppServer.cs')) -OutputPath $mock -Main 'MockAppServer'
-Invoke-CSharpBuild -Environment $environment -Sources ($sources + @((Join-Path $PSScriptRoot 'tests\OfflineTests.cs'))) -OutputPath $offline -Main 'OfflineTests'
+Invoke-CSharpBuild -Environment $environment -Sources ($sources + @((Join-Path $PSScriptRoot 'tests\OfflineTests.cs'), (Join-Path $PSScriptRoot 'tests\HoverTests.cs'), (Join-Path $PSScriptRoot 'tests\TooltipWindowTests.cs'))) -OutputPath $offline -Main 'OfflineTests'
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'src\App.config') -Destination ($offline + '.config') -Force
 & $offline $mock (Join-Path $testDirectory 'mock-control.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Offline C# tests failed.' }

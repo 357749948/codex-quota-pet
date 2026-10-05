@@ -6,6 +6,8 @@ The overlay starts its own `codex --no-daemon app-server --stdio` child process 
 
 The child process performs the authenticated service requests needed to read quota. The overlay does not operate a server or send telemetry. It only shuts down the child process it created, not other Codex sessions.
 
+The hover tip displays reset times from the existing in-memory quota snapshot. Hovering does not trigger additional account or network requests.
+
 Template preparation installs pinned Python packages into a repository-local virtual environment using pip. That installation contacts the configured package index. Normal quota reads contact the services used by Codex itself.
 
 ## Screen region
@@ -13,6 +15,8 @@ Template preparation installs pinned Python packages into a repository-local vir
 Windows UI Automation locates the pet image. While the desktop is unlocked and the pet is visible, the application captures that pet bounding rectangle in memory to match its animation and screen position. This region can include background pixels within the rectangle. It is not full-desktop capture.
 
 The capture is used locally and is not saved or uploaded. Locking the desktop stops capture and hides the overlay. Ambiguous locations or unsupported animation frames hide the overlay.
+
+To detect hover without intercepting the pet's mouse input, the app reads the cursor position and mouse-button state every 100 milliseconds while running. These values are used locally for hit testing and dismissal; it does not record or upload mouse-movement history. The tip hides when the desktop is locked, the pet is unavailable, or cursor reading fails.
 
 ## Local files
 
@@ -25,7 +29,7 @@ The capture is used locally and is not saved or uploaded. Locking the desktop st
 | Repository `dist`, `.build`, and test output directories | Local build and test artifacts |
 | Current-user Startup folder | `CodexQuotaPet.lnk`, only when login startup is enabled |
 
-`state.json` contains quota values and status, update/reset times, process and session identifiers, pet/window coordinates, and recognition status. It is not a login credential file, but these operational details can still be private. Exceptions can also contain local paths. Review and redact diagnostics before sharing; do not attach whole files by default.
+`state.json` contains quota values and status, update/reset times, process and session identifiers, pet/window coordinates, recognition status, and tooltip visibility, window handle, styles and bounds. It does not contain cursor history. It is not a login credential file, but these operational details can still be private. Exceptions can also contain local paths. Review and redact diagnostics before sharing; do not attach whole files by default.
 
 The source-only release contains none of these local files. Uninstall preserves the separate `CodexQuotaPetData` directory and unknown user files, and does not alter Codex login or configuration. The retained data directory can be removed manually after the overlay exits if no longer needed. See the uninstall script for the exact installed-file allowlist; uninstall does not erase local development artifacts.
 
@@ -35,4 +39,4 @@ Prefer a short error message with project, Windows, Codex, and display-scaling v
 
 ---
 
-额度由本机 Codex CLI 子进程读取，使用 CLI 现有登录，可能与桌面账户不同。本项目没有自己的后台或遥测；不会直接读取登录文件。宠物矩形区域的图像仅在内存中用于识别，不保存或上传，锁屏时停止读取。该矩形可能包含部分桌面背景。模板和诊断保存在本机，诊断含额度、时间和窗口位置，公开前应检查脱敏。
+额度由本机 Codex CLI 子进程读取，使用 CLI 现有登录，可能与桌面账户不同。本项目没有自己的后台或遥测；不会直接读取登录文件。宠物矩形区域的图像仅在内存中用于识别，不保存或上传，锁屏时停止读取。该矩形可能包含部分桌面背景。悬停提示复用已有额度数据，不增加查询；程序每 100 毫秒读取鼠标位置和按键状态用于本机判断，不记录或上传鼠标移动历史。模板和诊断保存在本机，诊断含额度、时间和窗口位置，公开前应检查脱敏。

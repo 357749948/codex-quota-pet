@@ -22,8 +22,10 @@ internal static class OfflineTests
         {
             QuotaService.RunSelfTests(); PetTracker.RunSelfTests(); OverlayLogic.RunSelfTests(); ScreenFrames.RunSelfTests();
             Console.WriteLine("PASS quota parsing, account changes, freshness, placement, template validation");
+            HoverTests.Run();
             SyntheticMatcher();
             FontRendering();
+            TooltipWindowTests.Run();
             MockProtocol(args[0], args[1]);
             Console.WriteLine("PASS additional assertions: " + _checks);
             return 0;

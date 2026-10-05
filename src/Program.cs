@@ -106,6 +106,14 @@ namespace CodexQuotaPet
         private readonly PetTracker _tracker = new PetTracker();
         private readonly ScreenTracker _screen = new ScreenTracker();
         private readonly QuotaWindowView _window = new QuotaWindowView();
+        private readonly ResetTooltipView _tooltip = new ResetTooltipView();
+        private readonly HoverSession _hover = new HoverSession();
+        private readonly Stopwatch _hoverClock = Stopwatch.StartNew();
+        private DispatcherTimer _hoverTimer;
+        private OverlayPlacement _tooltipPlacement;
+        private long _lastPointerSample = -100;
+        private int _pointerX, _pointerY;
+        private bool _pointerValid, _pointerButton;
         private Forms.NotifyIcon _tray;
         private Forms.ToolStripMenuItem _details, _status;
         private DispatcherTimer _timer;
@@ -146,6 +154,9 @@ namespace CodexQuotaPet
             _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _timer.Tick += delegate { UpdateSession(); Update(); };
             _timer.Start();
+            _hoverTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            _hoverTimer.Tick += delegate { UpdateHover(); };
+            _hoverTimer.Start();
             _quota.SetPetVisible(false);
             _quota.Start();
             _screen.Start();
@@ -205,6 +216,7 @@ namespace CodexQuotaPet
                 Native.MoveNoActivate(_window.Handle, _placement);
             }
             else if (_window.IsVisible) _window.Hide();
+            UpdateHover();
             string quotaText = "Codex 宠物额度";
             if (_snapshot != null && _snapshot.Windows != null && _snapshot.Windows.Count > 0)
                 quotaText = _snapshot.Windows[0].Label + "剩余 " + OverlayLogic.Percentage(_snapshot.Windows[0].RemainingPercent);
@@ -213,6 +225,44 @@ namespace CodexQuotaPet
             if (_tray != null) _tray.Text = quotaText.Length > 63 ? quotaText.Substring(0, 63) : quotaText;
             _status.Text = visible ? quotaText : !_sessionUnlocked ? "屏幕已锁定 · 显示暂停" : _anchor != null && _anchor.Visible ? (!ScreenFrames.IsReady ? ScreenFrames.TemplateStatus : "等待正面屏幕 · " + quotaText) : "宠物未显示 · 额度层已隐藏";
             WriteState(false);
+        }
+
+        private void UpdateHover()
+        {
+            if (_disposed) return;
+            PetAnchor a = _anchor;
+            // A remembered hotspot survives the pet's own jumping animation,
+            // but only while the same visible pet/session/template remains.
+            bool eligible = _sessionUnlocked && ScreenFrames.IsReady && a != null && a.Visible;
+            long now = _hoverClock.ElapsedMilliseconds;
+            if (eligible && now - _lastPointerSample >= 100)
+            {
+                _pointerValid = Native.TryPointer(out _pointerX, out _pointerY, out _pointerButton);
+                _lastPointerSample = now;
+            }
+            else if (!eligible) { _pointerValid = false; _lastPointerSample = -100; }
+            eligible = eligible && _pointerValid;
+            bool show = _hover.Update(eligible, _screenMatch, a, _pointerX, _pointerY, _pointerButton, now);
+            if (show)
+            {
+                _tooltip.Render(HoverLogic.Content(_snapshot, DateTime.UtcNow));
+                _tooltipPlacement = HoverLogic.Place(a, _tooltip.Width, _tooltip.Height);
+                show = _tooltipPlacement != null;
+            }
+            bool wasVisible = _tooltip.IsVisible;
+            if (show)
+            {
+                if (_tooltip.Handle == IntPtr.Zero) new WindowInteropHelper(_tooltip).EnsureHandle();
+                Native.MoveNoActivate(_tooltip.Handle, _tooltipPlacement);
+                if (!_tooltip.IsVisible) _tooltip.Show();
+                Native.MoveNoActivate(_tooltip.Handle, _tooltipPlacement);
+            }
+            else
+            {
+                _tooltipPlacement = null;
+                if (_tooltip.IsVisible) _tooltip.Hide();
+            }
+            if (wasVisible != _tooltip.IsVisible) WriteState(true);
         }
 
         private void ShowDetails()
@@ -268,6 +318,8 @@ namespace CodexQuotaPet
                     { "startedAtUtc", _started.ToString("o") }, { "updatedAtUtc", DateTime.UtcNow.ToString("o") },
                     { "overlayVisible", _window.IsVisible }, { "overlayHwnd", _window.Handle.ToInt64() },
                     { "extendedStyle", Native.GetExStyle(_window.Handle) }, { "overlayBounds", _placement },
+                    { "tooltipVisible", _tooltip.IsVisible }, { "tooltipHwnd", _tooltip.Handle.ToInt64() },
+                    { "tooltipExtendedStyle", Native.GetExStyle(_tooltip.Handle) }, { "tooltipBounds", _tooltipPlacement },
                     { "pet", _anchor }, { "quota", _snapshot },
                     { "displayMode", "robot-screen" }, { "sessionUnlocked", _sessionUnlocked },
                     { "templateStatus", ScreenFrames.TemplateStatus },
@@ -295,12 +347,15 @@ namespace CodexQuotaPet
             if (_disposed) return;
             _disposed = true;
             if (_timer != null) _timer.Stop();
+            if (_hoverTimer != null) _hoverTimer.Stop();
+            _hover.Reset(); _tooltip.Hide();
             SystemEvents.PowerModeChanged -= PowerChanged;
             SystemEvents.SessionSwitch -= SessionChanged;
             if (_exitWait != null) _exitWait.Unregister(null);
             _screen.Dispose(); _tracker.Dispose(); _quota.Dispose();
             if (_tray != null) { _tray.Visible = false; _tray.Icon.Dispose(); _tray.Dispose(); }
             _window.Hide(); WriteState(true); _window.Close();
+            _tooltip.Close();
         }
     }
 
@@ -314,6 +369,19 @@ namespace CodexQuotaPet
         [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr h, int i, IntPtr n);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int w, int h, uint flags);
         [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
+        [StructLayout(LayoutKind.Sequential)] private struct CursorPoint { public int X, Y; }
+        [DllImport("user32.dll")] private static extern bool GetPhysicalCursorPos(out CursorPoint point);
+        [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+
+        public static bool TryPointer(out int x, out int y, out bool buttonDown)
+        {
+            CursorPoint point;
+            bool found = GetPhysicalCursorPos(out point);
+            x = point.X; y = point.Y;
+            buttonDown = (GetAsyncKeyState(1) & 0x8000) != 0 || (GetAsyncKeyState(2) & 0x8000) != 0 ||
+                (GetAsyncKeyState(4) & 0x8000) != 0 || (GetAsyncKeyState(5) & 0x8000) != 0 || (GetAsyncKeyState(6) & 0x8000) != 0;
+            return found;
+        }
 
         public static void EnableDpi()
         {
