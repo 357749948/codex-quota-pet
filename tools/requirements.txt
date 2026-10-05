@@ -1,0 +1,5 @@
+# Used only for local template generation and offline developer tests.
+# Python 3.13 x64. Runtime C# program has no Python dependency.
+numpy==2.4.4
+opencv-python-headless==4.13.0.92
+Pillow==12.2.0

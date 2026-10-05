@@ -1,0 +1,35 @@
+name: Windows source validation
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Prepare isolated template test dependencies
+        shell: powershell
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\.venv\Scripts\python.exe -m pip install -r tools/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build and run offline tests
+        shell: powershell
+        run: .\test.ps1
+      - name: Check release tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        run: |
+          $expected = 'v' + (Get-Content VERSION -Raw).Trim()
+          if ($env:GITHUB_REF_NAME -ne $expected) { throw 'Tag and VERSION differ.' }

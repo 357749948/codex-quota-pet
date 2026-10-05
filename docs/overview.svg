@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="260" viewBox="0 0 840 260" role="img" aria-labelledby="title desc">
+  <title id="title">Quota overlay concept</title>
+  <desc id="desc">An original diagram: a local quota reading flows into a generic display showing an example 63 percent. This is not a picture of the Codex pet.</desc>
+  <rect width="840" height="260" rx="20" fill="#11151c"/>
+  <text x="36" y="48" font-family="Segoe UI, sans-serif" font-size="23" font-weight="600" fill="#edf4fb">Codex Quota Pet</text>
+  <text x="36" y="75" font-family="Segoe UI, sans-serif" font-size="14" fill="#9aa8ba">Local quota → passive screen overlay</text>
+  <rect x="42" y="116" width="215" height="74" rx="12" fill="#202936" stroke="#4a596d"/>
+  <text x="149" y="145" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="17" fill="#edf4fb">Codex CLI</text>
+  <text x="149" y="169" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" fill="#9aa8ba">Existing local login</text>
+  <path d="M280 154 H390 M380 144 L391 154 L380 164" fill="none" stroke="#74d5c1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="422" y="101" width="155" height="103" rx="12" fill="#283442" stroke="#607088" stroke-width="2"/>
+  <rect x="435" y="115" width="129" height="74" rx="5" fill="#070b10"/>
+  <text x="499" y="169" text-anchor="middle" font-family="Consolas, monospace" font-size="49" font-weight="700" fill="#74d5c1">63%</text>
+  <text x="610" y="141" font-family="Segoe UI, sans-serif" font-size="16" fill="#edf4fb">Large digits</text>
+  <text x="610" y="168" font-family="Segoe UI, sans-serif" font-size="14" fill="#9aa8ba">Click-through</text>
+  <text x="42" y="233" font-family="Segoe UI, sans-serif" font-size="12" fill="#7f8fa3">Original concept diagram · example value · no pet artwork included</text>
+</svg>

@@ -1,0 +1,40 @@
+name: Bug report / 问题反馈
+description: Build, quota display, or compatibility problem
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the problem without uploading login files, tokens, original pet images, local template JSON, or private desktop screenshots. Review any diagnostic excerpt before posting. / 请勿上传登录文件、令牌、原始宠物素材、本机模板或含私人内容的截图。
+  - type: input
+    id: version
+    attributes:
+      label: Project version / 项目版本
+      placeholder: v1.2.0 or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment / 环境
+      description: Windows version, Codex desktop/CLI version, display scaling, monitor count, Python version if generation failed. No usernames or local paths needed.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps and result / 操作与结果
+      description: What you did, what you expected, and what happened. Include the tray status when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted evidence / 已脱敏信息
+      description: Optional short error excerpt and offline test result. Do not paste whole state or login files.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy / 隐私
+      options:
+        - label: I reviewed this report for credentials, personal information, and third-party artwork. / 已检查凭据、个人信息和第三方素材。
+          required: true
