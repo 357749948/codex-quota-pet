@@ -4,7 +4,7 @@
 
 Display remaining Codex quota as large digits inside the **Null Signal** pet's face screen. The overlay follows the pet and allows mouse input through; its window uses non-activating, non-focusable settings. Unsupported or uncertain animation frames show the original pet instead. See [compatibility](docs/compatibility.md) for the actual validation scope.
 
-This is an unofficial project, not affiliated with or endorsed by OpenAI. The current `main` source version is **1.3.0**, which adds reset-time hover tips; the [published v1.2.0 release](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) does not include them. Both require a local build. The repository includes no Codex pet artwork, recognition templates, or application binaries.
+This is an unofficial project, not affiliated with or endorsed by OpenAI. The current `main` source version is **1.3.1**, which adds reset-time hover tips; the [published v1.2.0 release](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) does not include them. Both require a local build. The repository includes no Codex pet artwork, recognition templates, or application binaries.
 
 ![Original concept diagram; 63% is an example, not account data](docs/overview.svg)
 
@@ -18,7 +18,7 @@ This is an unofficial project, not affiliated with or endorsed by OpenAI. The cu
 
 ## Build and run
 
-Clone `main` or download its source archive to build 1.3.0 with hover tips. Archives attached to earlier releases still contain their respective versions. Open PowerShell in the repository root:
+Clone `main` or download its source archive to build 1.3.1 with hover tips. Archives attached to earlier releases still contain their respective versions. Open PowerShell in the repository root:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
@@ -70,7 +70,7 @@ Installation uses `%LOCALAPPDATA%\CodexQuotaPet`, without administrator access. 
 - A hover remembers the original digit region, so the pet's own jumping or turning animation does not repeatedly dismiss the tip. Brief recognition gaps receive up to 750 milliseconds of grace; sustained recognition loss, a hidden pet or a locked desktop still dismiss it.
 - Hovering uses the existing quota snapshot without extra requests. Missing reset times show “Unavailable”; elapsed reset times show “Waiting for update.” Stale, offline, and expired-login data show their status rather than presenting an old time as the next reset.
 - Remaining quota is `100 - usedPercent`, clamped to 0–100. Colors are teal, amber at ≤30%, and red at ≤10%.
-- Reads immediately on appearance, every 30 seconds while visible, and on quota events. Hidden pets pause periodic reads. Appearance, resume, or manual refresh triggers another read. Server statistics can lag.
+- Reads immediately on appearance, every 60 seconds while visible, and on quota events. Hidden pets pause periodic reads. Appearance, resume, or manual refresh triggers another read. Server statistics can lag.
 - Missing values are not zero. At 90 seconds without success, the screen shows `--` and the tray marks data stale; at 5 minutes it marks the connection offline. Expired login has a separate status.
 - Requests time out after 15 seconds. Failure retries back off to a maximum 5-minute interval. Reset time triggers a read, never an assumed 100% balance.
 - The overlay and tip hide when the pet is hidden, the desktop is locked, the animation is unsupported, or recognition is uncertain. Screen-region capture pauses while locked. The UI is Chinese; all displayed times use Beijing time (UTC+8).

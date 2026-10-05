@@ -11,6 +11,10 @@ The initial compatibility baseline is Codex desktop package **26.928.4866.0**. T
 
 Only one unambiguous visible pet is supported. Extreme perspective/glitch frames intentionally restore the original image. Other pets, macOS/Linux, ARM64, and headless/service sessions are outside the initial target.
 
+## v1.3.1 polling interval
+
+Normal quota polling while the pet is visible now runs every 60 seconds. Manual refresh, appearance, resume, reset-time checks and quota events retain their existing behavior. Failure backoff and the 90-second stale / 5-minute offline thresholds are unchanged. The complete offline suite passed, and the local 1.3.1 upgrade was verified with live quota, one running instance and the existing login-startup preference preserved.
+
 ## v1.3.0 verification record
 
 Version 1.3.0 on `main` adds reset-time hover tips. It is not a new GitHub Release; the published v1.2.0 archive remains unchanged. Validation below is tracked separately from the historical v1.2.0 results; unperformed desktop scenarios remain explicitly unverified.

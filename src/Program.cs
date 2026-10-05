@@ -281,7 +281,7 @@ namespace CodexQuotaPet
             if (_snapshot != null && !string.IsNullOrEmpty(_snapshot.Error)) text.AppendLine(_snapshot.Error);
             text.AppendLine("模板状态：" + ScreenFrames.TemplateStatus);
             if (!ScreenFrames.IsReady) text.AppendLine("请在源码目录运行 prepare-templates.ps1；生成后程序会自动重试。");
-            text.AppendLine("\n显示时每 30 秒刷新；服务器统计可能存在延迟。");
+            text.AppendLine("\n显示时每 " + QuotaService.RefreshIntervalSeconds + " 秒刷新；服务器统计可能存在延迟。");
             MessageBox.Show(text.ToString(), "Codex 额度", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 

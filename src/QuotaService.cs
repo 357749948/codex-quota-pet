@@ -34,6 +34,7 @@ namespace CodexQuotaPet
     public sealed class QuotaService : IDisposable
     {
         private const int RequestTimeoutSeconds = 15;
+        internal const int RefreshIntervalSeconds = 60;
         private static readonly object ProcessStartHandleGate = new object();
         [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr GetStdHandle(int handle);
         [DllImport("kernel32.dll", SetLastError = true)] private static extern bool SetStdHandle(int handle, IntPtr value);
@@ -173,7 +174,7 @@ namespace CodexQuotaPet
                             QuotaSnapshot snapshot = SnapshotFromBucket(bucket, _planType, DateTime.UtcNow);
                             Publish(snapshot);
                             _failures = 0;
-                            _nextAttemptUtc = DateTime.UtcNow.AddSeconds(30);
+                            _nextAttemptUtc = DateTime.UtcNow.AddSeconds(RefreshIntervalSeconds);
                         }
                         catch (OperationCanceledException) { break; }
                         catch (AccountChangedException)
@@ -436,7 +437,7 @@ namespace CodexQuotaPet
             _selectedLimitId = limitId ?? _selectedLimitId;
             Publish(SnapshotFromBucket(merged, _planType, DateTime.UtcNow));
             _failures = 0;
-            _nextAttemptUtc = DateTime.UtcNow.AddSeconds(30);
+            _nextAttemptUtc = DateTime.UtcNow.AddSeconds(RefreshIntervalSeconds);
         }
 
         private void RecordFailure(string state, string error)
