@@ -57,8 +57,10 @@ class ArchiveTests(unittest.TestCase):
             resources.mkdir(parents=True)
             target = resources / "app.asar"
             target.write_bytes(archive_bytes())
-            self.assertEqual(asar.find_archive(root), target)
-            self.assertEqual(asar.find_archive(target), target)
+            # Windows temporary paths may use 8.3 names while resolve() returns
+            # their long spelling. Assert file identity, not path spelling.
+            self.assertTrue(asar.find_archive(root).samefile(target))
+            self.assertTrue(asar.find_archive(target).samefile(target))
             with self.assertRaises(ValueError):
                 asar.find_archive(resources)
 
