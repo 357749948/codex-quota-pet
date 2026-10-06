@@ -4,9 +4,22 @@
 
 在 Codex 的 **Null Signal** 宠物脸部屏幕中显示剩余额度，用清晰的大字百分比覆盖原来的文字。显示层跟随宠物，鼠标可穿透，窗口按不激活、不获取键盘焦点的方式创建；难以可靠识别的动画帧会恢复原画面。实际验证范围见[兼容性记录](docs/compatibility.md)。
 
-这是非 OpenAI 官方项目，与 OpenAI 无隶属或背书关系。当前 `main` 源码版本为 **1.3.1**，新增悬停查看重置时间；[已发布的 v1.2.0](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) 不含此功能。两者均需自行构建，仓库不包含 Codex 宠物素材、识别模板或可执行文件。
+这是非 OpenAI 官方项目，与 OpenAI 无隶属或背书关系。当前 `main` 源码版本为 **1.3.1**，包含悬停查看重置时间和每分钟刷新；[已发布的 v1.2.0](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) 不含这些更新。两者均需自行构建；仓库不分发从 Codex 提取的素材原图、识别模板或可执行文件。
 
-![原创功能示意图；63% 为示例，并非实际账户数据](docs/overview.svg)
+## 实际效果
+
+<table>
+  <tr>
+    <th>大字剩余额度</th>
+    <th>悬停提示框特写</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/quota-screen.png" width="160" alt="实际运行截图：机器人屏幕显示大字剩余额度百分比"></td>
+    <td align="center"><img src="docs/screenshots/quota-hover.png" width="376" alt="实际运行截图：悬停提示框显示北京时间的下次重置时间"></td>
+  </tr>
+</table>
+
+两张截图分别来自桌面验收：左图展示大字额度，右图展示悬停提示框。额度与重置时间仅代表各自拍摄时的状态，不是查看者的当前账户数据。截图中的 Codex 界面和宠物美术不属于本项目的 MIT 许可范围，详见[素材说明](docs/third-party-notices.md)。另可查看[原创功能示意图](docs/overview.svg)。
 
 ## 环境要求
 
@@ -85,7 +98,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Uninstall.ps1
 
 Codex 更新后若提示模板缺失或不匹配，重新执行 `prepare-templates.ps1`。显示层会自动重新读取缓存，也可以退出后重启。如果生成器提示素材未支持，需要等待兼容性更新；不要强行修改指纹或继续使用旧模板。
 
-本项目只对自己编写的代码和文档提供 [MIT 许可](LICENSE)，不为 Codex 原素材或本机派生数据授予再分发许可。请不要上传本机模板、素材或带有原画的测试附件。详见[依赖与素材说明](docs/third-party-notices.md)。
+本项目只对自己编写的代码和文档提供 [MIT 许可](LICENSE)，不为截图中的 Codex 界面、宠物美术、原素材或本机派生数据授予再分发许可。请不要上传本机模板、提取的素材或带有原画的测试附件。文档效果截图与运行时素材分开管理，详见[依赖与素材说明](docs/third-party-notices.md)。
 
 ## 测试与问题反馈
 
@@ -101,6 +114,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1 -DesktopProbe
 
 这些检查不能替代实际悬停、拖动、隐藏、锁屏恢复和不同缩放的交互验收。悬停验收应核对两个周期的时间，并确认提示显示时动画、宠物点击及键盘焦点正常。已验证项和限制见[兼容性记录](docs/compatibility.md)。
 
-程序只在内存中读取宠物所在屏幕区域，不保存或上传截图。额度查询由本机 Codex 子进程完成，没有本项目运营的后台或遥测服务。本地诊断仍含额度、时间和窗口位置，分享前应检查脱敏。详见[数据处理说明](docs/privacy.md)。
+程序只在内存中读取宠物所在屏幕区域，不保存或上传截图。上方的效果截图为单独准备的文档素材，并非程序自动生成或上传。额度查询由本机 Codex 子进程完成，没有本项目运营的后台或遥测服务。本地诊断仍含额度、时间和窗口位置，分享前应检查脱敏。详见[数据处理说明](docs/privacy.md)。
 
 报告问题时提供项目版本、Windows/Codex 版本、缩放比例及简短错误信息；不要提交登录文件、令牌、模板或私人桌面截图。开发与贡献见 [CONTRIBUTING](CONTRIBUTING.md)，安全问题见 [SECURITY](SECURITY.md)。

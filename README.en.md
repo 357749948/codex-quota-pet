@@ -4,9 +4,22 @@
 
 Display remaining Codex quota as large digits inside the **Null Signal** pet's face screen. The overlay follows the pet and allows mouse input through; its window uses non-activating, non-focusable settings. Unsupported or uncertain animation frames show the original pet instead. See [compatibility](docs/compatibility.md) for the actual validation scope.
 
-This is an unofficial project, not affiliated with or endorsed by OpenAI. The current `main` source version is **1.3.1**, which adds reset-time hover tips; the [published v1.2.0 release](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) does not include them. Both require a local build. The repository includes no Codex pet artwork, recognition templates, or application binaries.
+This is an unofficial project, not affiliated with or endorsed by OpenAI. The current `main` source version is **1.3.1**, with reset-time hover tips and one-minute polling; the [published v1.2.0 release](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) does not include these changes. Both require a local build. The repository does not distribute original assets extracted from Codex, recognition templates, or application binaries.
 
-![Original concept diagram; 63% is an example, not account data](docs/overview.svg)
+## In use
+
+<table>
+  <tr>
+    <th>Large remaining-quota display</th>
+    <th>Reset-time hover tip close-up</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/quota-screen.png" width="160" alt="Actual running app: large remaining-quota percentage on the robot screen"></td>
+    <td align="center"><img src="docs/screenshots/quota-hover.png" width="376" alt="Actual running app: close-up of the next-reset hover tip in Beijing time"></td>
+  </tr>
+</table>
+
+These separate captures come from desktop validation: the quota display on the left and the hover tip on the right. Quota and reset times reflect each capture's state, not the viewer's current account. The Codex UI and pet artwork shown are excluded from this project's MIT license; see [material notices](docs/third-party-notices.md). An [original concept diagram](docs/overview.svg) is also available.
 
 ## Requirements
 
@@ -83,7 +96,7 @@ Templates are generated only on the user's computer under `%LOCALAPPDATA%\CodexQ
 
 If a Codex update causes a missing/mismatched-template status, run `prepare-templates.ps1`. The overlay reloads the cache automatically; restarting it is also fine. An unknown asset requires a compatibility update. Do not override fingerprint checks or reuse an incompatible template.
 
-The [MIT license](LICENSE) covers this project's own code and documentation. It does not grant redistribution rights to Codex artwork or locally derived data. Do not upload local templates, sprite images, or screenshots containing that artwork. See [third-party notices](docs/third-party-notices.md).
+The [MIT license](LICENSE) covers this project's own code and documentation. It does not grant redistribution rights to the Codex UI or pet artwork shown in screenshots, original assets, or locally derived data. Do not upload local templates, extracted sprite images, or test attachments containing the artwork. Documentation screenshots are managed separately from runtime assets; see [third-party notices](docs/third-party-notices.md).
 
 ## Tests and feedback
 
@@ -99,6 +112,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1 -DesktopProbe
 
 These checks do not replace hovering, dragging, hiding, lock/unlock, or mixed-DPI desktop validation. Hover validation should compare both returned reset times and confirm animation, pet clicks, and typing focus remain correct while the tip is visible. See [compatibility](docs/compatibility.md) for recorded results and limits.
 
-Pet-region images stay in memory; the app does not save or upload screenshots. The local Codex process performs quota requests. There is no project-operated server or telemetry. Local diagnostics still include quota, timestamps, and window positions; review them before sharing. See [data handling](docs/privacy.md).
+Pet-region images stay in memory; the app does not save or upload screenshots. The examples above were prepared separately for documentation, not automatically generated or uploaded by the app. The local Codex process performs quota requests. There is no project-operated server or telemetry. Local diagnostics still include quota, timestamps, and window positions; review them before sharing. See [data handling](docs/privacy.md).
 
 Reports should include project, Windows, and Codex versions, display scaling, and a short redacted error. Do not submit login files, tokens, templates, or private desktop screenshots. See [contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md).

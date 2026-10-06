@@ -1,6 +1,6 @@
 # Dependencies and material provenance
 
-The repository's own code, documentation, original SVG diagram, and synthetic test-generation code use the [MIT license](../LICENSE). No third-party source, binary, font, Codex sprite image, or generated recognition table is bundled in the source release.
+The repository's own code, written documentation, original SVG diagram, and synthetic test-generation code use the [MIT license](../LICENSE). Third-party UI and pet artwork visible in documentation screenshots are excluded from that license. No third-party source, binary, font, extracted Codex sprite image, or generated recognition table is bundled in the repository.
 
 ## Locally installed development dependencies
 
@@ -19,8 +19,10 @@ Binary wheels can contain additional libraries. Their installed license files an
 
 The application references .NET Framework/WPF and Windows APIs supplied by the user's system. It uses the installed Consolas font without bundling font files. Microsoft components remain subject to their own terms.
 
-Codex is separately installed software. OpenAI names are used to identify compatibility, not to imply endorsement. The source repository includes no OpenAI logos, pet artwork, personal desktop screenshots, or recognition templates extracted from that artwork.
+Codex is separately installed software. OpenAI names are used to identify compatibility, not to imply endorsement. The repository includes two cropped desktop-validation screenshots under `docs/screenshots`: the quota overlay on Codex's Null Signal pet and a close-up of the reset-time tip. They contain third-party pet artwork and a small wallpaper background, but no unrelated application windows, messages, or account identifiers. They are documentation examples, not runtime assets, extracted sprites, or recognition templates.
+
+The screenshots document the application's behavior. Their inclusion does not place the third-party material under MIT or grant rights to reuse that material. This project makes no claim of a license from OpenAI to redistribute its artwork.
 
 The local preparation tool reads a supported sprite from the user's installed Codex and generates a local cache. Asset hashes are compatibility identifiers, not artwork. The project has not established permission to redistribute Codex's built-in art or the resulting derived recognition data. Keeping those files local does not create or transfer third-party rights; the project's MIT license does not cover them.
 
-Contributors should publish original synthetic fixtures and code only. Do not add original or derived Codex image data to commits, issue attachments, CI artifacts, or releases without separately establishing the relevant rights.
+Use original synthetic fixtures for tests and CI. Keep extracted sprites and derived recognition data out of commits, issue attachments, CI artifacts, and releases. Proposed additions to the curated documentation screenshots require separate review of their provenance, third-party material, and private content; existing screenshots are not permission to publish other Codex assets.
