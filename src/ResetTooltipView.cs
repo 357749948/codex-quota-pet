@@ -15,6 +15,8 @@ namespace CodexQuotaPet
         private readonly Border _border;
         private string _contentKey;
         public IntPtr Handle { get; private set; }
+        public double MeasuredWidth { get; private set; }
+        public double MeasuredHeight { get; private set; }
 
         public ResetTooltipView()
         {
@@ -57,29 +59,48 @@ namespace CodexQuotaPet
         {
             string key = content.Title + "\n" + content.Status;
             foreach (HoverRow row in content.Rows) key += "\n" + row.Label + "\t" + row.Value;
+            key += "\n--credits--";
+            foreach (HoverRow row in content.ResetCreditRows) key += "\n" + row.Label + "\t" + row.Value;
+            key += "\n" + content.ResetCreditNotice;
             if (key == _contentKey) return;
             _contentKey = key;
             _rows.Children.Clear();
             _rows.Children.Add(new TextBlock
             {
                 Text = content.Title, Foreground = Brush("#B9C5D6"),
-                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 5)
+                TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(0, 0, 0, 5)
             });
             if (!String.IsNullOrEmpty(content.Status))
-                _rows.Children.Add(new TextBlock { Text = content.Status, TextWrapping = TextWrapping.Wrap });
-            foreach (HoverRow row in content.Rows)
+                _rows.Children.Add(new TextBlock { Text = content.Status, TextWrapping = TextWrapping.NoWrap });
+            AddRows(content.Rows);
+            _rows.Children.Add(new Border { Height = 1, Background = Brush("#46505F"), Margin = new Thickness(0, 8, 0, 6) });
+            AddRows(content.ResetCreditRows);
+            if (!String.IsNullOrEmpty(content.ResetCreditNotice))
+                _rows.Children.Add(new TextBlock { Text = content.ResetCreditNotice, Foreground = Brush("#B9C5D6"),
+                    TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(0, 4, 0, 0) });
+            // Measure in logical pixels. The host places the HWND in physical
+            // pixels using the pet monitor's DPI, just like the face overlay.
+            // Natural sizing leaves placement to hide an oversized tooltip,
+            // rather than wrapping or clipping its expiry information.
+            _border.Measure(new Size(Double.PositiveInfinity, Double.PositiveInfinity));
+            MeasuredWidth = Math.Ceiling(_border.DesiredSize.Width);
+            _border.Measure(new Size(MeasuredWidth, Double.PositiveInfinity));
+            MeasuredHeight = Math.Ceiling(_border.DesiredSize.Height);
+            // WPF can coerce Window.Height to the monitor's maximum tracking
+            // size. Keep the full dimensions for the placement fit check.
+            Width = MeasuredWidth;
+            Height = MeasuredHeight;
+        }
+
+        private void AddRows(System.Collections.Generic.List<HoverRow> rows)
+        {
+            foreach (HoverRow row in rows)
             {
-                var text = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
+                var text = new TextBlock { TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(0, 2, 0, 0) };
                 text.Inlines.Add(new Run(row.Label + "："));
                 text.Inlines.Add(new Run(row.Value) { FontWeight = FontWeights.Bold });
                 _rows.Children.Add(text);
             }
-            // Measure in logical pixels. The host places the HWND in physical
-            // pixels using the pet monitor's DPI, just like the face overlay.
-            _border.Measure(new Size(360, Double.PositiveInfinity));
-            Width = Math.Ceiling(Math.Min(360, _border.DesiredSize.Width));
-            _border.Measure(new Size(Width, Double.PositiveInfinity));
-            Height = Math.Ceiling(_border.DesiredSize.Height);
         }
     }
 }

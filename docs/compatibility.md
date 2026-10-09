@@ -11,6 +11,23 @@ The initial compatibility baseline is Codex desktop package **26.928.4866.0**. T
 
 Only one unambiguous visible pet is supported. Extreme perspective/glitch frames intentionally restore the original image. Other pets, macOS/Linux, ARM64, and headless/service sessions are outside the initial target.
 
+## v1.4.0 reset-credit details
+
+Version 1.4.0 adds available reset-credit counts and individual expiration times below the quota reset times. It reads `rateLimitResetCredits.availableCount` and `credits` from the existing local `account/rateLimits/read` response, including credit details in the normal 60-second query. Older CLI versions may omit this optional field; the tip then shows “暂不可用” while quota remains usable. The program has no credit-redemption action. This source update does not create a new tag or GitHub Release; v1.2.0 remains the published archive.
+
+| Check | Status |
+| --- | --- |
+| Local app-server response shape | Verified with Codex CLI `0.162.0-alpha.2`: the existing read returned an available count and credit details; raw responses, identifiers and account-specific values are not published |
+| Offline parsing, expiry formatting, partial details and freshness | Passed: C# service tests, 304 hover assertions, mock protocol recovery/legacy responses, 3-scale WPF layout, 80-row oversized-content rejection, isolated installer tests and 9 synthetic Python tests |
+| Periodic reads under quota events and one-time expiration refresh | Passed: quota events preserve credit timestamps and full-read deadlines; expiration bypasses retry backoff once, without decrementing the count or looping on unchanged expired replies. A live credit update interval of 61.29 seconds was observed, including request time |
+| Actual count/expiration comparison and complete tip at 200% scaling | Passed on 2026-10-09: count and every expiration matched the live response, all text was visible, and the complete tip stayed within the work area and outside the pet |
+| Hover stability, clicks, dragging, hiding/showing and keyboard focus | Passed: stationary-pointer animation samples retained the tip, passive HWND checks and foreground retention passed; the user confirmed clear, stable display and normal dragging, hiding/showing and typing |
+| Backed-up upgrade, startup-choice retention and duplicate launch | Passed: verified the 1.3.1 backup, installed the tested 1.4.0 binary, observed live quota and credits, retained enabled login startup, and confirmed one running instance after duplicate launch |
+| GitHub Windows automated checks | The workflow builds and runs the same offline suite for each `main` update; see the [current workflow results](https://github.com/357749948/codex-quota-pet/actions/workflows/ci.yml) |
+| Lock/unlock, restart, sleep/resume, real sign-in and mixed-DPI cross-monitor movement | Not yet physically verified for v1.4.0 |
+
+Known expiration times are sorted first, non-expiring credits last; missing or invalid times are labeled unavailable. The server's available count is authoritative even when it returns only part of the detail list. Credits become stale independently of quota events (90 seconds stale, 5 minutes offline), and old details are not displayed in those states. A known expiration triggers one new read, not a local count decrement. The expanded tip must fit entirely outside the pet and inside a monitor's work area, or it remains hidden.
+
 ## v1.3.1 polling interval
 
 Normal quota polling while the pet is visible now runs every 60 seconds. Manual refresh, appearance, resume, reset-time checks and quota events retain their existing behavior. Failure backoff and the 90-second stale / 5-minute offline thresholds are unchanged. The complete offline suite passed, and the local 1.3.1 upgrade was verified with live quota, one running instance and the existing login-startup preference preserved.
@@ -64,8 +81,8 @@ The live smoke test ran the new v1.2.0 candidate. It did not replace the existin
 ## Local validation procedure
 
 1. In a clean checkout, follow the README in order: build, generate templates, run offline tests.
-2. Run `test.ps1 -Live` only when prepared to read the CLI's actual account. Compare percentage, quota window and reset time with the same account's Codex usage display; do not publish account values.
-3. With Null Signal visible, use `test.ps1 -DesktopProbe`. A found node confirms discovery only. Check the rendered digits and animation visually. Hover over the quota for about 300 milliseconds, compare all returned reset times, and confirm the tip stays outside the pet and inside the work area. Move away and press mouse buttons to verify dismissal; check it recovers on a new hover.
+2. Run `test.ps1 -Live` only when prepared to read the CLI's actual account. Compare percentage, quota window and reset time with the same account's Codex usage display; compare credit count and each expiration with the local read response. Do not publish account values.
+3. With Null Signal visible, use `test.ps1 -DesktopProbe`. A found node confirms discovery only. Check the rendered digits and animation visually. Hover over the quota for about 300 milliseconds, compare all returned reset times and available credit details, and confirm the complete tip stays outside the pet and inside the work area. Verify that insufficient space hides the tip rather than clipping details. Move away and press mouse buttons to verify dismissal; check it recovers on a new hover.
 4. Drag, hide and show the pet. Check that animation remains stable while the tip is visible, clicks reach the pet, and the current application retains typing focus. Start the app again and confirm only one overlay exists.
 5. Lock/unlock, restart Codex, and test sleep/resume. Observe hidden/recovered state. Test actual monitors and record their scaling, rather than inferring cross-monitor behavior from calculations.
 6. Run installer tests in an isolated test location. Test startup registration separately from a real Windows sign-in. Back up an existing working installation before an approved upgrade, retain its startup choice, and restore it if the upgrade fails.

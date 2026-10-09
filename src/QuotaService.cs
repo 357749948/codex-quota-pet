@@ -27,6 +27,7 @@ namespace CodexQuotaPet
         public string State;
         public string Error;
         public string PlanType;
+        public ResetCreditsSnapshot ResetCredits;
     }
 
     // The one worker owns the protocol, its child process, and every refresh.
@@ -148,8 +149,7 @@ namespace CodexQuotaPet
                         manual = _manualRefreshRequested;
                     }
                     DateTime now = DateTime.UtcNow;
-                    bool resetDue = visible && _failures == 0 && ConsumeDueReset(now);
-                    if (manual || (visible && (requested || resetDue || now >= _nextAttemptUtc)))
+                    if (ShouldRefresh(now, visible, requested, manual))
                     {
                         lock (_gate)
                         {
@@ -165,14 +165,7 @@ namespace CodexQuotaPet
                             int accountEpoch = _accountEpoch;
                             Dictionary<string, object> result = Request("account/rateLimits/read", null);
                             if (accountEpoch != _accountEpoch) throw new AccountChangedException();
-                            string limitId;
-                            Dictionary<string, object> bucket = ChooseBucket(result, out limitId);
-                            if (bucket == null) throw new SourceFailure("error", "暂无额度信息");
-                            _selectedLimitId = limitId;
-                            _lastBucket = new Dictionary<string, object>(bucket);
-                            _acceptQuotaNotifications = true;
-                            QuotaSnapshot snapshot = SnapshotFromBucket(bucket, _planType, DateTime.UtcNow);
-                            Publish(snapshot);
+                            ApplyReadResult(result, DateTime.UtcNow);
                             _failures = 0;
                             _nextAttemptUtc = DateTime.UtcNow.AddSeconds(RefreshIntervalSeconds);
                         }
@@ -435,9 +428,33 @@ namespace CodexQuotaPet
             }
             _lastBucket = merged;
             _selectedLimitId = limitId ?? _selectedLimitId;
-            Publish(SnapshotFromBucket(merged, _planType, DateTime.UtcNow));
-            _failures = 0;
-            _nextAttemptUtc = DateTime.UtcNow.AddSeconds(RefreshIntervalSeconds);
+            QuotaSnapshot updated = SnapshotFromBucket(merged, _planType, DateTime.UtcNow);
+            updated.ResetCredits = Current.ResetCredits;
+            Publish(updated);
+            // These events contain quota windows, not reset-credit details.
+            // Only a complete read may reset its polling or retry schedule.
+        }
+
+        private void ApplyReadResult(Dictionary<string, object> result, DateTime now)
+        {
+            ResetCreditsSnapshot credits = ResetCredits.Parse(Get(result, "rateLimitResetCredits"), now);
+            string limitId;
+            Dictionary<string, object> bucket = ChooseBucket(result, out limitId);
+            if (bucket == null)
+            {
+                // A full reply still replaces the independently queried credits,
+                // even if its quota bucket is temporarily unavailable.
+                QuotaSnapshot previous = Current;
+                previous.ResetCredits = credits;
+                Publish(previous);
+                throw new SourceFailure("error", "暂无额度信息");
+            }
+            _selectedLimitId = limitId;
+            _lastBucket = new Dictionary<string, object>(bucket);
+            _acceptQuotaNotifications = true;
+            QuotaSnapshot snapshot = SnapshotFromBucket(bucket, _planType, now);
+            snapshot.ResetCredits = credits;
+            Publish(snapshot);
         }
 
         private void RecordFailure(string state, string error)
@@ -473,6 +490,16 @@ namespace CodexQuotaPet
             });
         }
 
+        private bool ShouldRefresh(DateTime now, bool visible, bool requested, bool manual)
+        {
+            // A credit reaching expiry gets one immediate read even during a
+            // retry delay. Consuming its timestamp before the attempt means a
+            // failed read then resumes normal backoff instead of looping.
+            bool quotaResetDue = visible && _failures == 0 && ConsumeDueReset(now);
+            bool creditExpiryDue = visible && ConsumeDueCreditExpiry(now);
+            return manual || (visible && (requested || quotaResetDue || creditExpiryDue || now >= _nextAttemptUtc));
+        }
+
         private bool ConsumeDueReset(DateTime now)
         {
             bool found = false;
@@ -483,6 +510,20 @@ namespace CodexQuotaPet
                 string key = (_selectedLimitId ?? "codex") + ":" + window.ResetsAtUtc.Value.Ticks.ToString(CultureInfo.InvariantCulture);
                 if (_triggeredResets.Add(key)) found = true;
             }
+            return found;
+        }
+
+        private bool ConsumeDueCreditExpiry(DateTime now)
+        {
+            bool found = false;
+            QuotaSnapshot snapshot = Current;
+            if (snapshot.ResetCredits != null && snapshot.ResetCredits.AvailableCount > 0 && snapshot.ResetCredits.Credits != null)
+                foreach (ResetCredit credit in snapshot.ResetCredits.Credits)
+                {
+                    if (!credit.ExpiresAtUtc.HasValue || now < credit.ExpiresAtUtc.Value) continue;
+                    string key = "credit:" + credit.ExpiresAtUtc.Value.Ticks.ToString(CultureInfo.InvariantCulture);
+                    if (_triggeredResets.Add(key)) found = true;
+                }
             return found;
         }
 
@@ -689,7 +730,8 @@ namespace CodexQuotaPet
                 LastSuccessUtc = snapshot.LastSuccessUtc,
                 State = snapshot.State,
                 Error = snapshot.Error,
-                PlanType = snapshot.PlanType
+                PlanType = snapshot.PlanType,
+                ResetCredits = ResetCredits.Copy(snapshot.ResetCredits)
             };
         }
 
@@ -741,6 +783,7 @@ namespace CodexQuotaPet
 
         public static void RunSelfTests()
         {
+            RunResetCreditSelfTests();
             Assert(!FullyQualifiedPath("C:codex.exe") && !FullyQualifiedPath(@"\codex.exe") && !FullyQualifiedPath("codex.exe"), "relative executable paths rejected");
             Assert(FullyQualifiedPath(@"C:\tools\codex.exe") && FullyQualifiedPath(@"\\server\tools\codex.exe"), "qualified executable paths accepted");
             JavaScriptSerializer json = new JavaScriptSerializer();
@@ -857,6 +900,103 @@ namespace CodexQuotaPet
                 service.HandleNotification(AsObject(json.DeserializeObject(
                     "{\"method\":\"account/updated\",\"params\":{\"authMode\":\"apikey\"}}")));
                 Assert(service.Current.State == "login_required" && service.Current.Error == "请使用 ChatGPT 账户登录", "unsupported login mode is explicit");
+            }
+        }
+
+        private static void RunResetCreditSelfTests()
+        {
+            DateTime now = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var json = new JavaScriptSerializer();
+            var summary = AsObject(json.DeserializeObject("{\"availableCount\":8,\"credits\":[" +
+                "{\"id\":\"synthetic-do-not-retain\",\"status\":\"available\",\"expiresAt\":null}," +
+                "{\"status\":\"available\",\"expiresAt\":1735689601}," +
+                "{\"status\":\"used\",\"expiresAt\":1735680000}," +
+                "{\"status\":\"available\",\"expiresAt\":1735689600}," +
+                "{\"status\":\"available\"},{\"status\":\"available\",\"expiresAt\":\"bad\"}," +
+                "{\"status\":\"available\",\"expiresAt\":9223372036854775807}]}"));
+            ResetCreditsSnapshot parsed = ResetCredits.Parse(summary, now);
+            Assert(parsed.AvailableCount == 8 && parsed.LastSuccessUtc == now && parsed.DetailsAvailable, "independent count and success time");
+            Assert(parsed.Credits.Count == 6, "available credits only; partial count is not inferred");
+            Assert(parsed.Credits[0].ExpiresAtUtc == now && parsed.Credits[1].ExpiresAtUtc == now.AddSeconds(1) &&
+                parsed.Credits[5].NeverExpires, "credit expiry ordering and Unix seconds");
+            Assert(!parsed.Credits[2].ExpiresAtUtc.HasValue && !parsed.Credits[2].NeverExpires &&
+                !parsed.Credits[3].ExpiresAtUtc.HasValue && !parsed.Credits[4].ExpiresAtUtc.HasValue,
+                "missing, malformed and overflowing expiry remain unknown");
+            Assert(ResetCredits.Parse(null, now).AvailableCount == null, "absent reset support is unknown");
+            foreach (object invalid in new object[] { null, -1, 1.5, 1.0000000000000002, "2", true, Double.NaN, Double.PositiveInfinity, UInt64.MaxValue })
+            {
+                ResetCreditsSnapshot missing = ResetCredits.Parse(new Dictionary<string, object> { { "availableCount", invalid } }, now);
+                Assert(!missing.AvailableCount.HasValue && !missing.LastSuccessUtc.HasValue && missing.Credits.Count == 0,
+                    "invalid count never becomes a valid fresh zero");
+            }
+            ResetCreditsSnapshot zero = ResetCredits.Parse(AsObject(json.DeserializeObject("{\"availableCount\":0,\"credits\":[]}")), now);
+            Assert(zero.AvailableCount == 0 && zero.DetailsAvailable && zero.Credits.Count == 0, "zero is a valid fresh count");
+            Assert(ResetCredits.Parse(new Dictionary<string, object> { { "availableCount", Int64.MaxValue } }, now).AvailableCount == Int64.MaxValue,
+                "integer count preserves Int64 precision");
+            ResetCreditsSnapshot noDetails = ResetCredits.Parse(AsObject(json.DeserializeObject("{\"availableCount\":2,\"credits\":null}")), now);
+            Assert(noDetails.AvailableCount == 2 && !noDetails.DetailsAvailable && noDetails.Credits.Count == 0, "missing details do not erase count");
+
+            var response = AsObject(json.DeserializeObject("{\"rateLimitsByLimitId\":{\"codex\":{\"primary\":{\"usedPercent\":37,\"windowDurationMins\":10080,\"resetsAt\":2000000000}}}}"));
+            response["rateLimitResetCredits"] = summary;
+            var notification = AsObject(json.DeserializeObject("{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"primary\":{\"usedPercent\":40}}}}"));
+            using (var service = new QuotaService())
+            {
+                service.ApplyReadResult(response, now);
+                QuotaSnapshot copy = service.Current;
+                copy.ResetCredits.AvailableCount = 99;
+                copy.ResetCredits.Credits[0].ExpiresAtUtc = now.AddDays(5);
+                Assert(service.Current.ResetCredits.AvailableCount == 8 && service.Current.ResetCredits.Credits[0].ExpiresAtUtc == now,
+                    "credit snapshots are deeply isolated");
+                DateTime scheduled = now.AddSeconds(RefreshIntervalSeconds);
+                service._nextAttemptUtc = scheduled;
+                service.HandleNotification(notification);
+                Assert(service._nextAttemptUtc == scheduled && service.Current.ResetCredits.LastSuccessUtc == now &&
+                    service.Current.ResetCredits.AvailableCount == 8 && service.Current.Windows[0].RemainingPercent == 60,
+                    "quota event preserves credit freshness and full-read schedule");
+                service.RecordFailure("error", "额度读取暂时失败");
+                DateTime retryAt = service._nextAttemptUtc;
+                service.HandleNotification(notification);
+                Assert(service._failures == 1 && service._nextAttemptUtc == retryAt && service.Current.ResetCredits.LastSuccessUtc == now,
+                    "quota events cannot cancel or postpone full-read backoff");
+                Assert(!service.ShouldRefresh(now.AddTicks(-1), true, false, false), "no early credit expiry request during backoff");
+                Assert(!service.ShouldRefresh(now, false, false, false), "hidden credit expiry waits until visible");
+                Assert(service.ShouldRefresh(now, true, false, false) && !service.ShouldRefresh(now, true, false, false),
+                    "credit expiry requests once per timestamp even during backoff");
+                service.RecordFailure("error", "额度读取暂时失败");
+                DateTime resumedRetry = service._nextAttemptUtc;
+                Assert(service._failures == 2 && !service.ShouldRefresh(now, true, false, false) && service._nextAttemptUtc == resumedRetry,
+                    "failed expiry refresh resumes backoff without another immediate request");
+                Assert(service.ShouldRefresh(now.AddSeconds(1), true, false, false) && !service.ShouldRefresh(now.AddSeconds(1), true, false, false) &&
+                    service.Current.ResetCredits.AvailableCount == 8, "successive expiries request without deducting credits");
+                service.ApplyReadResult(response, now.AddSeconds(2));
+                Assert(!service.ShouldRefresh(now.AddSeconds(2), true, false, false), "unchanged expired details cannot cause a refresh loop");
+                response.Remove("rateLimitResetCredits");
+                service.ApplyReadResult(response, now.AddSeconds(3));
+                Assert(!service.Current.ResetCredits.AvailableCount.HasValue && !service.Current.ResetCredits.LastSuccessUtc.HasValue &&
+                    service.Current.ResetCredits.Credits.Count == 0, "successful legacy response clears old reset summary");
+                response["rateLimitResetCredits"] = summary;
+                service.ApplyReadResult(response, now.AddSeconds(4));
+                Assert(service.Current.ResetCredits.LastSuccessUtc == now.AddSeconds(4), "full-read recovery refreshes reset data");
+                service.RecordFailure("login_required", "请重新登录 Codex");
+                Assert(service.Current.ResetCredits == null, "login failure clears count and expiry details");
+            }
+            using (var service = new QuotaService())
+            {
+                var accountA = AsObject(json.DeserializeObject("{\"account\":{\"type\":\"chatgpt\",\"email\":\"a@example.invalid\"}}"));
+                var accountB = AsObject(json.DeserializeObject("{\"account\":{\"type\":\"chatgpt\",\"email\":\"b@example.invalid\"}}"));
+                service.ApplyAccount(accountA);
+                service.ApplyReadResult(response, now);
+                service.ApplyAccount(accountB);
+                Assert(service.Current.ResetCredits == null, "account switch clears credits before another read");
+                service.ApplyReadResult(response, now);
+                try { service.ApplyReadResult(new Dictionary<string, object>(), now.AddSeconds(1)); }
+                catch (SourceFailure) { }
+                Assert(service.Current.ResetCredits != null && !service.Current.ResetCredits.AvailableCount.HasValue,
+                    "missing quota bucket does not preserve an absent full-read credit summary");
+                response["rateLimitResetCredits"] = new Dictionary<string, object> { { "availableCount", -1 } };
+                service.ApplyReadResult(response, now.AddSeconds(2));
+                Assert(!service.Current.ResetCredits.AvailableCount.HasValue && service.Current.Windows[0].RemainingPercent == 63,
+                    "invalid reset summary does not suppress valid quota windows");
             }
         }
 

@@ -246,7 +246,7 @@ namespace CodexQuotaPet
             if (show)
             {
                 _tooltip.Render(HoverLogic.Content(_snapshot, DateTime.UtcNow));
-                _tooltipPlacement = HoverLogic.Place(a, _tooltip.Width, _tooltip.Height);
+                _tooltipPlacement = HoverLogic.Place(a, _tooltip.MeasuredWidth, _tooltip.MeasuredHeight);
                 show = _tooltipPlacement != null;
             }
             bool wasVisible = _tooltip.IsVisible;

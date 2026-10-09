@@ -4,7 +4,7 @@
 
 Display remaining Codex quota as large digits inside the **Null Signal** pet's face screen. The overlay follows the pet and allows mouse input through; its window uses non-activating, non-focusable settings. Unsupported or uncertain animation frames show the original pet instead. See [compatibility](docs/compatibility.md) for the actual validation scope.
 
-This is an unofficial project, not affiliated with or endorsed by OpenAI. The current `main` source version is **1.3.1**, with reset-time hover tips and one-minute polling; the [published v1.2.0 release](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) does not include these changes. Both require a local build. The repository does not distribute original assets extracted from Codex, recognition templates, or application binaries.
+This is an unofficial project, not affiliated with or endorsed by OpenAI. The current `main` source version is **1.4.0**, with hover tips for quota resets, available reset credits and individual expiration times, retaining one-minute polling; the [published v1.2.0 release](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) does not include these changes. Both require a local build. The repository does not distribute original assets extracted from Codex, recognition templates, or application binaries.
 
 ## In use
 
@@ -19,7 +19,7 @@ This is an unofficial project, not affiliated with or endorsed by OpenAI. The cu
   </tr>
 </table>
 
-These separate captures come from desktop validation: the quota display on the left and the hover tip on the right. Quota and reset times reflect each capture's state, not the viewer's current account. The Codex UI and pet artwork shown are excluded from this project's MIT license; see [material notices](docs/third-party-notices.md). An [original concept diagram](docs/overview.svg) is also available.
+These separate captures come from earlier desktop validation: the quota display on the left and the hover tip on the right. They do not yet show the available reset credits and expiration times added in 1.4.0. Quota and reset times reflect each capture's state, not the viewer's current account. The Codex UI and pet artwork shown are excluded from this project's MIT license; see [material notices](docs/third-party-notices.md). An [original concept diagram](docs/overview.svg) is also available.
 
 ## Requirements
 
@@ -31,7 +31,7 @@ These separate captures come from desktop validation: the quota display on the l
 
 ## Build and run
 
-Clone `main` or download its source archive to build 1.3.1 with hover tips. Archives attached to earlier releases still contain their respective versions. Open PowerShell in the repository root:
+Clone `main` or download its source archive to build 1.4.0 with reset-credit counts and expiration times. Archives attached to earlier releases still contain their respective versions. Open PowerShell in the repository root:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
@@ -79,11 +79,14 @@ Installation uses `%LOCALAPPDATA%\CodexQuotaPet`, without administrator access. 
 ## Behavior
 
 - The screen shows one percentage, preferring the weekly window. Hover over the quota digits for about **300 milliseconds** to see a “Next reset (Beijing time)” tip listing each returned quota period and reset time. The tray also provides these details.
+- Below the quota reset times, the tip shows the available reset-credit count and individual expiration times in chronological order, with non-expiring credits last. Counts and times use bold text; dates in a different year include the year. A zero count has no detail rows. This is a read-only display with no action to redeem a credit.
+- The count comes from the server, not the detail-list length. Only `available` credits are listed. An explicit `null` expiration means “No expiration”; missing or invalid times show “Expiration unavailable.” Partial results state “X / N expiration details returned”; an absent list shows “Expiration unavailable.”
 - The tip uses a dark rounded background and light text, with width fitted to its content and equal left/right padding. It prefers a position above the pet, then tries its sides or below. It stays within the monitor work area and avoids the pet; if no position fits, it stays hidden. It allows mouse input through and does not activate or take focus. Moving away or pressing a mouse button hides it; releasing starts a new hover delay.
 - A hover remembers the original digit region, so the pet's own jumping or turning animation does not repeatedly dismiss the tip. Brief recognition gaps receive up to 750 milliseconds of grace; sustained recognition loss, a hidden pet or a locked desktop still dismiss it.
 - Hovering uses the existing quota snapshot without extra requests. Missing reset times show “Unavailable”; elapsed reset times show “Waiting for update.” Stale, offline, and expired-login data show their status rather than presenting an old time as the next reset.
 - Remaining quota is `100 - usedPercent`, clamped to 0–100. Colors are teal, amber at ≤30%, and red at ≤10%.
-- Reads immediately on appearance, every 60 seconds while visible, and on quota events. Hidden pets pause periodic reads. Appearance, resume, or manual refresh triggers another read. Server statistics can lag.
+- Reads quota and reset-credit details through the local `account/rateLimits/read` call immediately on appearance and every 60 seconds while visible. Quota events update quota without refreshing credit timestamps or postponing full reads. Hidden pets pause periodic reads. Appearance, resume, or manual refresh triggers another read. Server statistics can lag.
+- Reset credits have separate freshness: unsupported or missing fields show “Unavailable”; after 90 seconds without success they show “Waiting for update,” and at 5 minutes “Offline,” without old expiration details. Account changes or expired login clear previous credits. Unavailable credits do not suppress valid quota data. Reaching a known credit expiration triggers one immediate read and shows “Expired, waiting for update,” without subtracting from the count locally.
 - Missing values are not zero. At 90 seconds without success, the screen shows `--` and the tray marks data stale; at 5 minutes it marks the connection offline. Expired login has a separate status.
 - Requests time out after 15 seconds. Failure retries back off to a maximum 5-minute interval. Reset time triggers a read, never an assumed 100% balance.
 - The overlay and tip hide when the pet is hidden, the desktop is locked, the animation is unsupported, or recognition is uncertain. Screen-region capture pauses while locked. The UI is Chinese; all displayed times use Beijing time (UTC+8).
@@ -110,8 +113,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1 -Live
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1 -DesktopProbe
 ```
 
-These checks do not replace hovering, dragging, hiding, lock/unlock, or mixed-DPI desktop validation. Hover validation should compare both returned reset times and confirm animation, pet clicks, and typing focus remain correct while the tip is visible. See [compatibility](docs/compatibility.md) for recorded results and limits.
+These checks do not replace hovering, dragging, hiding, lock/unlock, or mixed-DPI desktop validation. Hover validation should compare returned quota reset times, the available reset-credit count and every expiration time, and confirm animation, pet clicks, and typing focus remain correct. The expanded tip must fit in full; if it cannot, it hides instead of shrinking text or truncating rows. See [compatibility](docs/compatibility.md) for recorded results and limits.
 
-Pet-region images stay in memory; the app does not save or upload screenshots. The examples above were prepared separately for documentation, not automatically generated or uploaded by the app. The local Codex process performs quota requests. There is no project-operated server or telemetry. Local diagnostics still include quota, timestamps, and window positions; review them before sharing. See [data handling](docs/privacy.md).
+Pet-region images stay in memory; the app does not save or upload screenshots. The examples above were prepared separately for documentation, not automatically generated or uploaded by the app. The local Codex process reads quota and reset credits, without direct login-file access, an added HTTP client, or new dependencies. There is no project-operated server or telemetry. Local diagnostics include quota, credit counts, expiration times, and window positions; review them before sharing. See [data handling](docs/privacy.md).
 
 Reports should include project, Windows, and Codex versions, display scaling, and a short redacted error. Do not submit login files, tokens, templates, or private desktop screenshots. See [contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md).

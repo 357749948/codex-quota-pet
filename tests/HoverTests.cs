@@ -8,7 +8,7 @@ internal static class HoverTests
 
     public static void Run()
     {
-        ResetContent(); HitAreas(); Placements(); Dwell(); JumpingPet();
+        ResetContent(); ResetCreditContent(); HitAreas(); Placements(); Dwell(); JumpingPet();
         Console.WriteLine("PASS hover/reset logic assertions: " + _checks);
     }
 
@@ -98,6 +98,89 @@ internal static class HoverTests
         snapshot.Windows = new List<QuotaWindow> { weekly };
         snapshot.LastSuccessUtc = now;
         Require(HoverLogic.Content(snapshot, now).Rows.Count == 1, "recovered fresh data replaces stale status");
+    }
+
+    private static void ResetCreditContent()
+    {
+        DateTime now = new DateTime(2026, 10, 9, 15, 0, 0, DateTimeKind.Utc);
+        var snapshot = new QuotaSnapshot { State = "ready", LastSuccessUtc = now,
+            Windows = new List<QuotaWindow> { new QuotaWindow { Label = "本周", ResetsAtUtc = now.AddDays(1) } } };
+        RequireCreditStatus(HoverLogic.Content(snapshot, now), "暂不可用", "older Codex without credits is unknown");
+        var credits = new ResetCreditsSnapshot { AvailableCount = 2, LastSuccessUtc = now, DetailsAvailable = true,
+            Credits = new List<ResetCredit> {
+                new ResetCredit { ExpiresAtUtc = now.AddDays(3) }, new ResetCredit { ExpiresAtUtc = now.AddHours(2) } } };
+        snapshot.ResetCredits = credits;
+        HoverContent content = HoverLogic.Content(snapshot, now);
+        Require(content.Rows.Count == 1 && content.ResetCreditRows.Count == 3 && content.ResetCreditNotice == "", "single period with count and all expirations");
+        Require(content.ResetCreditRows[0].Label == "可用重置" && content.ResetCreditRows[0].Value == "2 次", "count comes from the server field");
+        Require(content.ResetCreditRows[1].Label == "第1次到期" && content.ResetCreditRows[1].Value == "10月10日 01:00:00", "sort ascending and cross Beijing midnight");
+        Require(content.ResetCreditRows[2].Value == "10月12日 23:00:00", "later expiration follows earlier");
+        Require(credits.Credits[0].ExpiresAtUtc == now.AddDays(3), "render does not reorder service snapshot");
+        snapshot.Windows.Add(new QuotaWindow { Label = "5小时", ResetsAtUtc = now.AddHours(3) });
+        content = HoverLogic.Content(snapshot, now);
+        Require(content.Rows.Count == 2 && content.ResetCreditRows.Count == 3, "dual periods keep independent credit section");
+        credits.AvailableCount = 0;
+        RequireCreditStatus(HoverLogic.Content(snapshot, now), "0 次", "zero hides contradictory supplied details");
+        credits.AvailableCount = 4;
+        content = HoverLogic.Content(snapshot, now);
+        Require(content.ResetCreditRows.Count == 3 && content.ResetCreditRows[0].Value == "4 次" &&
+            content.ResetCreditNotice == "仅返回 2 / 4 项到期明细", "partial detail count never replaces available count");
+        credits.DetailsAvailable = false;
+        content = HoverLogic.Content(snapshot, now);
+        Require(content.ResetCreditRows.Count == 1 && content.ResetCreditNotice == "到期时间暂不可用", "missing details keep known count without rendering untrusted list");
+        credits.DetailsAvailable = true; credits.Credits.Clear();
+        Require(HoverLogic.Content(snapshot, now).ResetCreditNotice == "到期时间暂不可用", "empty detail list has explicit unavailable time");
+        credits.Credits = null;
+        Require(HoverLogic.Content(snapshot, now).ResetCreditNotice == "到期时间暂不可用", "null detail list is safe");
+        credits.Credits = new List<ResetCredit> { null, new ResetCredit { NeverExpires = true },
+            new ResetCredit(), new ResetCredit { ExpiresAtUtc = DateTime.MaxValue },
+            new ResetCredit { ExpiresAtUtc = now.AddMinutes(5) }, new ResetCredit { ExpiresAtUtc = now } };
+        credits.AvailableCount = 5;
+        content = HoverLogic.Content(snapshot, now);
+        Require(content.ResetCreditRows.Count == 6 && content.ResetCreditNotice == "", "invalid time retained as row while null entry ignored");
+        Require(content.ResetCreditRows[1].Value == "已到期，等待更新" && content.ResetCreditRows[2].Value == "10月09日 23:05:00", "expired row remains with explicit pending status");
+        Require(content.ResetCreditRows[3].Value == "到期时间暂不可用" && content.ResetCreditRows[4].Value == "到期时间暂不可用" &&
+            content.ResetCreditRows[5].Value == "长期有效", "finite then unknown then never-expiring order");
+        Require(content.ResetCreditRows[0].Value == "5 次", "expiration does not decrement server count");
+        credits.Credits = new List<ResetCredit> { new ResetCredit { ExpiresAtUtc = new DateTime(2026, 12, 31, 17, 4, 5, DateTimeKind.Utc) } };
+        credits.AvailableCount = 1;
+        Require(HoverLogic.Content(snapshot, now).ResetCreditRows[1].Value == "2027年01月01日 01:04:05", "credit cross-year date includes year");
+        DateTime boundary = new DateTime(2026, 12, 31, 17, 0, 0, DateTimeKind.Utc);
+        credits.LastSuccessUtc = snapshot.LastSuccessUtc = boundary;
+        Require(HoverLogic.Content(snapshot, boundary).ResetCreditRows[1].Value == "01月01日 01:04:05", "both year comparisons use Beijing year");
+        credits.LastSuccessUtc = now.AddSeconds(-89); snapshot.LastSuccessUtc = now;
+        Require(HoverLogic.Content(snapshot, now).ResetCreditRows.Count == 2, "credit fresh before ninety seconds");
+        credits.LastSuccessUtc = now.AddSeconds(-90);
+        RequireCreditStatus(HoverLogic.Content(snapshot, now), "待更新", "credit stale at ninety seconds hides old times");
+        Require(HoverLogic.Content(snapshot, now).Rows.Count == 2, "fresh quota unaffected by stale credits");
+        credits.LastSuccessUtc = now.AddSeconds(-300);
+        RequireCreditStatus(HoverLogic.Content(snapshot, now), "离线", "credit offline at five minutes hides old times");
+        credits.LastSuccessUtc = now; snapshot.LastSuccessUtc = now.AddSeconds(-300);
+        content = HoverLogic.Content(snapshot, now);
+        Require(content.Rows.Count == 0 && content.Status.StartsWith("离线") && content.ResetCreditRows.Count == 2, "quota offline does not hide independently fresh credits");
+        snapshot.State = "login_required";
+        RequireCreditStatus(HoverLogic.Content(snapshot, now), "请登录 Codex", "login override removes old credits");
+        snapshot.State = "loading"; snapshot.LastSuccessUtc = null; snapshot.ResetCredits = null;
+        RequireCreditStatus(HoverLogic.Content(snapshot, now), "暂不可用", "cleared snapshot after account switch contains no old credit data");
+        snapshot.State = "ready"; snapshot.LastSuccessUtc = now; snapshot.ResetCredits = credits;
+        credits.LastSuccessUtc = null;
+        RequireCreditStatus(HoverLogic.Content(snapshot, now), "暂不可用", "count without successful read timestamp is unknown");
+        credits.LastSuccessUtc = now; credits.AvailableCount = null;
+        RequireCreditStatus(HoverLogic.Content(snapshot, now), "暂不可用", "missing count is not derived from details");
+        credits.AvailableCount = -1;
+        RequireCreditStatus(HoverLogic.Content(snapshot, now), "暂不可用", "invalid negative count hides details");
+        credits.AvailableCount = Int64.MaxValue;
+        Require(HoverLogic.Content(snapshot, now).ResetCreditRows[0].Value == "9223372036854775807 次", "large count is preserved without integer overflow");
+        RequireCreditStatus(HoverLogic.Content(null, now), "暂不可用", "null snapshot still contains count section");
+        RequireCreditStatus(HoverLogic.Content(snapshot, DateTime.MaxValue), "暂不可用", "invalid local clock conversion cannot crash credit section");
+        credits.AvailableCount = 1;
+        Require(HoverLogic.Content(snapshot, now).ResetCreditRows.Count == 2, "recovery restores current credit details");
+    }
+
+    private static void RequireCreditStatus(HoverContent content, string value, string label)
+    {
+        Require(content.ResetCreditRows.Count == 1 && content.ResetCreditRows[0].Label == "可用重置" &&
+            content.ResetCreditRows[0].Value == value && content.ResetCreditNotice == "", label);
     }
 
     private static void HitAreas()

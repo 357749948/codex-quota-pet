@@ -27,7 +27,17 @@ internal static class MockAppServer
                     Console.WriteLine(json.Serialize(new { id = message["id"], error = new { code = 503, message = "Synthetic service unavailable" } }));
                     continue;
                 }
-                result = new { rateLimitsByLimitId = new { codex = new { primary = new { usedPercent = 18, windowDurationMins = 300, resetsAt = 2000000000 }, secondary = new { usedPercent = 37, windowDurationMins = 10080, resetsAt = 2000500000 } } } };
+                var quota = new { codex = new { primary = new { usedPercent = 18, windowDurationMins = 300, resetsAt = 2000000000 }, secondary = new { usedPercent = 37, windowDurationMins = 10080, resetsAt = 2000500000 } } };
+                var payload = new Dictionary<string, object> { { "rateLimitsByLimitId", quota } };
+                if (mode != "legacy")
+                    payload["rateLimitResetCredits"] = new {
+                        availableCount = mode == "zero-credits" ? 0 : 2,
+                        credits = mode == "count-only" ? null : mode == "zero-credits" ? new object[0] : new object[] {
+                            new { id = "synthetic-later", status = "available", expiresAt = 2000700000 },
+                            new { id = "synthetic-earlier", status = "available", expiresAt = 2000600000 }
+                        }
+                    };
+                result = payload;
             }
             Console.WriteLine(json.Serialize(new { id = message["id"], result = result }));
         }

@@ -151,14 +151,31 @@ internal static class OfflineTests
                 bool weekly = false, shortWindow = false;
                 foreach (var window in service.Current.Windows) { if (window.WindowMinutes == 10080 && window.RemainingPercent == 63) weekly = true; if (window.WindowMinutes == 300 && window.RemainingPercent == 82) shortWindow = true; }
                 Require(weekly && shortWindow, "mock exact remaining values");
+                Require(service.Current.ResetCredits != null && service.Current.ResetCredits.AvailableCount == 2 &&
+                    service.Current.ResetCredits.Credits.Count == 2, "reset count and details pass through protocol");
                 DateTime first = service.Current.LastSuccessUtc.Value;
                 service.SetPetVisible(true);
                 WaitFor(delegate { return service.Current.LastSuccessUtc > first; }, 8000, "visible immediate refresh", service);
                 service.SetPetVisible(false);
 
+                foreach (string mode in new[] { "count-only", "zero-credits", "legacy", "ready" })
+                {
+                    DateTime prior = service.Current.LastSuccessUtc.Value;
+                    File.WriteAllText(controlPath, mode); service.Refresh();
+                    WaitFor(delegate { return service.Current.LastSuccessUtc > prior; }, 8000, "reset-credit protocol mode " + mode, service);
+                    ResetCreditsSnapshot credits = service.Current.ResetCredits;
+                    Require(service.Current.Windows.Count == 2 && service.Current.State == "ready", "credit availability does not damage quota");
+                    if (mode == "count-only") Require(credits.AvailableCount == 2 && !credits.DetailsAvailable, "count-only response stays usable");
+                    if (mode == "zero-credits") Require(credits.AvailableCount == 0 && credits.Credits.Count == 0, "zero is a real count");
+                    if (mode == "legacy") Require(credits == null || !credits.AvailableCount.HasValue, "older server clears cached count");
+                    if (mode == "ready") Require(credits.AvailableCount == 2 && credits.Credits.Count == 2, "credit detail recovery");
+                }
+                DateTime creditSuccess = service.Current.ResetCredits.LastSuccessUtc.Value;
+
                 File.WriteAllText(controlPath, "http-error"); service.Refresh();
                 WaitFor(delegate { return service.Current.State == "error"; }, 8000, "HTTP failure surfaces", service);
                 Require(service.Current.LastSuccessUtc.HasValue, "failure retains old success timestamp");
+                Require(service.Current.ResetCredits.LastSuccessUtc == creditSuccess, "failure does not renew credit freshness");
                 File.WriteAllText(controlPath, "ready"); service.Refresh();
                 WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "HTTP recovery", service);
 
@@ -174,6 +191,8 @@ internal static class OfflineTests
                 File.WriteAllText(controlPath, "login"); service.Refresh();
                 WaitFor(delegate { return service.Current.State == "login_required"; }, 8000, "login expiry", service);
                 Require(!service.Current.LastSuccessUtc.HasValue, "expired account invalidates cached quota");
+                Require(service.Current.ResetCredits == null || !service.Current.ResetCredits.AvailableCount.HasValue,
+                    "expired account invalidates cached reset credits");
                 File.WriteAllText(controlPath, "ready"); service.Refresh();
                 WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "login recovery", service);
 

@@ -14,6 +14,8 @@ namespace CodexQuotaPet
         public string Title = "下次重置（北京时间）";
         public string Status = "";
         public List<HoverRow> Rows = new List<HoverRow>();
+        public List<HoverRow> ResetCreditRows = new List<HoverRow>();
+        public string ResetCreditNotice = "";
     }
 
     // All coordinates crossing the native window boundary are physical pixels.
@@ -81,10 +83,10 @@ namespace CodexQuotaPet
             var content = new HoverContent();
             try { content.Status = OverlayLogic.Freshness(snapshot, utcNow); }
             catch (ArgumentOutOfRangeException) { content.Status = "暂不可用"; }
-            if (content.Status.Length != 0) return content;
             DateTime beijingNow;
-            if (!TryBeijing(utcNow, out beijingNow)) { content.Status = "暂不可用"; return content; }
-            if (snapshot != null && snapshot.Windows != null)
+            bool hasBeijingNow = TryBeijing(utcNow, out beijingNow);
+            if (!hasBeijingNow) content.Status = "暂不可用";
+            if (content.Status.Length == 0 && snapshot != null && snapshot.Windows != null)
             {
                 foreach (QuotaWindow window in snapshot.Windows)
                 {
@@ -94,13 +96,71 @@ namespace CodexQuotaPet
                     if (window.ResetsAtUtc.HasValue && TryBeijing(window.ResetsAtUtc.Value, out localReset))
                     {
                         if (window.ResetsAtUtc.Value <= utcNow) value = "等待更新";
-                        else value = localReset.ToString(localReset.Year == beijingNow.Year ? "MM月dd日 HH:mm:ss" : "yyyy年MM月dd日 HH:mm:ss", CultureInfo.InvariantCulture);
+                        else value = FormatBeijing(localReset, beijingNow);
                     }
                     content.Rows.Add(new HoverRow { Label = String.IsNullOrWhiteSpace(window.Label) ? "额度" : window.Label, Value = value });
                 }
             }
-            if (content.Rows.Count == 0) content.Status = "暂无额度信息";
+            if (content.Status.Length == 0 && content.Rows.Count == 0) content.Status = "暂无额度信息";
+            ResetCreditContent(content, snapshot, utcNow, beijingNow, hasBeijingNow);
             return content;
+        }
+
+        private static void ResetCreditContent(HoverContent content, QuotaSnapshot snapshot, DateTime utcNow, DateTime beijingNow, bool hasBeijingNow)
+        {
+            ResetCreditsSnapshot credits = snapshot == null ? null : snapshot.ResetCredits;
+            string state = "";
+            if (snapshot != null && snapshot.State == "login_required") state = "请登录 Codex";
+            else if (!hasBeijingNow || credits == null || !credits.AvailableCount.HasValue ||
+                credits.AvailableCount.Value < 0 || !credits.LastSuccessUtc.HasValue) state = "暂不可用";
+            else
+            {
+                double age = (utcNow - credits.LastSuccessUtc.Value).TotalSeconds;
+                if (age >= 300) state = "离线";
+                else if (age >= 90) state = "待更新";
+            }
+            content.ResetCreditRows.Add(new HoverRow { Label = "可用重置", Value = state.Length == 0 ?
+                credits.AvailableCount.Value.ToString(CultureInfo.InvariantCulture) + " 次" : state });
+            // Credit freshness is independent of quota notifications. Never
+            // render yesterday's expirations merely because a quota event arrived.
+            if (state.Length != 0 || credits.AvailableCount.Value == 0) return;
+            var entries = new List<ResetCredit>();
+            if (credits.DetailsAvailable && credits.Credits != null)
+                foreach (ResetCredit credit in credits.Credits)
+                    if (credit != null) entries.Add(credit);
+            entries.Sort(delegate(ResetCredit a, ResetCredit b)
+            {
+                int aKind = CreditSortKind(a), bKind = CreditSortKind(b);
+                if (aKind != bKind) return aKind.CompareTo(bKind);
+                return aKind == 0 ? a.ExpiresAtUtc.Value.CompareTo(b.ExpiresAtUtc.Value) : 0;
+            });
+            for (int i = 0; i < entries.Count; i++)
+            {
+                ResetCredit credit = entries[i];
+                string value = "到期时间暂不可用";
+                DateTime expiration;
+                if (credit.NeverExpires) value = "长期有效";
+                else if (credit.ExpiresAtUtc.HasValue && TryBeijing(credit.ExpiresAtUtc.Value, out expiration))
+                    value = credit.ExpiresAtUtc.Value <= utcNow ? "已到期，等待更新" : FormatBeijing(expiration, beijingNow);
+                content.ResetCreditRows.Add(new HoverRow {
+                    Label = "第" + (i + 1).ToString(CultureInfo.InvariantCulture) + "次到期", Value = value });
+            }
+            if (entries.Count == 0) content.ResetCreditNotice = "到期时间暂不可用";
+            else if (entries.Count < credits.AvailableCount.Value)
+                content.ResetCreditNotice = "仅返回 " + entries.Count.ToString(CultureInfo.InvariantCulture) + " / " +
+                    credits.AvailableCount.Value.ToString(CultureInfo.InvariantCulture) + " 项到期明细";
+        }
+
+        private static int CreditSortKind(ResetCredit credit)
+        {
+            DateTime ignored;
+            if (credit.NeverExpires) return 2;
+            return credit.ExpiresAtUtc.HasValue && TryBeijing(credit.ExpiresAtUtc.Value, out ignored) ? 0 : 1;
+        }
+
+        private static string FormatBeijing(DateTime beijingDate, DateTime beijingNow)
+        {
+            return beijingDate.ToString(beijingDate.Year == beijingNow.Year ? "MM月dd日 HH:mm:ss" : "yyyy年MM月dd日 HH:mm:ss", CultureInfo.InvariantCulture);
         }
 
         private static bool TryBeijing(DateTime utc, out DateTime result)
