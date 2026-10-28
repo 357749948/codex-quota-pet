@@ -14,6 +14,7 @@ namespace CodexQuotaPet
         public string Title = "下次重置（北京时间）";
         public string Status = "";
         public List<HoverRow> Rows = new List<HoverRow>();
+        public HoverRow BalanceRow = new HoverRow { Label = "剩余额度", Value = "暂不可用" };
         public List<HoverRow> ResetCreditRows = new List<HoverRow>();
         public string ResetCreditNotice = "";
     }
@@ -102,8 +103,25 @@ namespace CodexQuotaPet
                 }
             }
             if (content.Status.Length == 0 && content.Rows.Count == 0) content.Status = "暂无额度信息";
+            content.BalanceRow = BalanceContent(snapshot, utcNow);
             ResetCreditContent(content, snapshot, utcNow, beijingNow, hasBeijingNow);
             return content;
+        }
+
+        private static HoverRow BalanceContent(QuotaSnapshot snapshot, DateTime utcNow)
+        {
+            CreditBalanceSnapshot balance = snapshot == null ? null : snapshot.CreditBalance;
+            string value = "暂不可用";
+            if (snapshot != null && snapshot.State == "login_required") value = "请登录 Codex";
+            else if (balance != null && balance.LastSuccessUtc.HasValue &&
+                (balance.Unlimited || (balance.Balance.HasValue && balance.Balance.Value >= 0)))
+            {
+                double age = (utcNow - balance.LastSuccessUtc.Value).TotalSeconds;
+                if (age >= 300) value = "离线";
+                else if (age >= 90) value = "待更新";
+                else value = balance.Unlimited ? "不限量" : balance.Balance.Value.ToString("#,0.##", CultureInfo.InvariantCulture);
+            }
+            return new HoverRow { Label = "剩余额度", Value = value };
         }
 
         private static void ResetCreditContent(HoverContent content, QuotaSnapshot snapshot, DateTime utcNow, DateTime beijingNow, bool hasBeijingNow)

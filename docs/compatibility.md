@@ -11,6 +11,24 @@ The initial compatibility baseline is Codex desktop package **26.928.4866.0**. T
 
 Only one unambiguous visible pet is supported. Extreme perspective/glitch frames intentionally restore the original image. Other pets, macOS/Linux, ARM64, and headless/service sessions are outside the initial target.
 
+## v1.5.0 remaining credit balance
+
+Version 1.5.0 adds a “剩余额度” row after the quota-reset divider and before reset-credit details. It reads the selected bucket's `credits.balance` from the existing app-server response and formats it with thousands separators and up to two decimal places, without a currency symbol. Zero, unlimited credit and unavailable data remain distinct. The interface does not supply the balance's expiration date, so there is no balance-expiration row or placeholder; existing reset-credit expiration rows remain.
+
+| Check | Status |
+| --- | --- |
+| Current local protocol | Verified on 2026-10-28 with Codex CLI `0.165.0-alpha.1.2`: `CreditsSnapshot` provides `hasCredits`, `unlimited` and `balance`, with no balance-expiration field; account-specific values are not published |
+| Decimal parsing, formatting, unavailable/zero/unlimited and freshness | Passed locally: C# service tests, 326 hover assertions, three-scale WPF layout, 101 additional assertions and 9 synthetic template tests |
+| Notification handling, complete-read recovery and account clearing | Passed: balance-only updates refresh balance, quota-only events preserve its timestamp, absent/malformed complete replies clear old data, and login loss/account switching clear balance |
+| Complete tooltip layout and balance comparison at 200% scaling | Passed on 2026-10-28: formatted balance matched the live response, appeared before reset credits, had no balance-expiration row, and fit outside the pet within the work area |
+| Hover stability, mouse pass-through and keyboard-focus retention | Passed: 77 stationary-pointer samples retained the visible tip across animation, actual HWND hit-test/activation checks passed, foreground was retained and moving away dismissed the tip |
+| Backed-up upgrade, startup-choice retention and duplicate launch | Passed: verified the 1.4.0 backup, installed the tested 1.5.0 binary, observed live quota/balance, retained enabled login startup and confirmed one running instance |
+| Local installer script and command-wrapper tests | Isolated installation/upgrade/startup and PowerShell-script uninstall passed under PowerShell 7.6.5. The separate installed `.cmd` uninstall check could not run because starting Windows PowerShell requires elevation on this machine; system settings were not changed |
+| GitHub Windows automated checks | The Windows PowerShell workflow builds and runs the complete offline suite, including the command-wrapper uninstall test; see the [current workflow results](https://github.com/357749948/codex-quota-pet/actions/workflows/ci.yml) |
+| Lock/unlock, restart, sleep/resume, real sign-in and mixed-DPI cross-monitor movement | Not yet physically verified for v1.5.0 |
+
+Balance uses an independent successful-read timestamp: 90 seconds stale, 5 minutes offline. Notifications without balance data preserve its original timestamp, while a complete reply without a usable balance clears the previous value. Account changes and expired login clear old balance data. This adds no requests, dependencies or credential access to the existing 60-second polling path.
+
 ## v1.4.0 reset-credit details
 
 Version 1.4.0 adds available reset-credit counts and individual expiration times below the quota reset times. It reads `rateLimitResetCredits.availableCount` and `credits` from the existing local `account/rateLimits/read` response, including credit details in the normal 60-second query. Older CLI versions may omit this optional field; the tip then shows “暂不可用” while quota remains usable. The program has no credit-redemption action. This source update does not create a new tag or GitHub Release; v1.2.0 remains the published archive.

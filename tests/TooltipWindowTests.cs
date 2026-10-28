@@ -60,6 +60,7 @@ internal static class TooltipWindowTests
     {
         snapshot.State = "ready";
         snapshot.Windows.Add(new QuotaWindow { Label = "5小时", ResetsAtUtc = now.AddHours(3) });
+        snapshot.CreditBalance = new CreditBalanceSnapshot { Balance = 12345.6789m, LastSuccessUtc = now };
         snapshot.ResetCredits = new ResetCreditsSnapshot { AvailableCount = 4, LastSuccessUtc = now, DetailsAvailable = true,
             Credits = new List<ResetCredit> {
                 new ResetCredit { ExpiresAtUtc = now.AddDays(3) },
@@ -70,11 +71,16 @@ internal static class TooltipWindowTests
         double detailHeight = tip.Height;
         var border = (Border)tip.Content;
         var rows = (StackPanel)border.Child;
-        Require(rows.Children.Count == 9, "title, two periods, divider, count and every detail are rendered");
-        var divider = rows.Children[3] as Border;
+        int dividerIndex = 1 + snapshot.Windows.Count;
+        int balanceIndex = dividerIndex + 1;
+        int countIndex = balanceIndex + 1;
+        Require(rows.Children.Count == countIndex + 1 + snapshot.ResetCredits.Credits.Count, "title, periods, divider, balance, count and every detail are rendered");
+        var divider = rows.Children[dividerIndex] as Border;
         Require(divider != null && divider.Height == 1 && divider.Background != null, "real thin line separates period dates from credits");
+        Require(((Run)((TextBlock)rows.Children[balanceIndex]).Inlines.FirstInline).Text == "剩余额度：" &&
+            ((Run)((TextBlock)rows.Children[balanceIndex]).Inlines.LastInline).Text == "12,345.68", "balance follows divider and precedes reset-credit count");
         Require(border.Padding.Left == border.Padding.Right && border.Padding.Left == 12, "balanced existing padding retained");
-        for (int i = 4; i < rows.Children.Count; i++)
+        for (int i = balanceIndex; i < rows.Children.Count; i++)
         {
             var text = rows.Children[i] as TextBlock;
             Require(text != null && text.FontSize == 14 && text.TextWrapping == TextWrapping.NoWrap, "count and every expiration use full-size unwrapped text");
@@ -106,22 +112,26 @@ internal static class TooltipWindowTests
                 placement.X + placement.Width <= anchor.Left - 8 * scale || placement.X >= anchor.Left + anchor.Width + 8 * scale ||
                 placement.Y >= anchor.Top + anchor.Height + 8 * scale, "credit tooltip does not obscure pet at scale " + scale);
         }
+        snapshot.CreditBalance.Balance = 9876.5m;
+        tip.Render(HoverLogic.Content(snapshot, now));
+        Require(((Run)((TextBlock)rows.Children[balanceIndex]).Inlines.LastInline).Text == "9,876.5", "balance-only update invalidates render cache");
+        Require(rows.Children.Count == countIndex + 1 + snapshot.ResetCredits.Credits.Count, "balance update adds no expiry placeholder");
         snapshot.ResetCredits.AvailableCount = 6;
         tip.Render(HoverLogic.Content(snapshot, now));
-        Require(rows.Children.Count == 10 && tip.Height > detailHeight, "partial-detail notice participates in content sizing");
-        Require(((TextBlock)rows.Children[9]).Text == "仅返回 4 / 6 项到期明细", "partial-detail notice is readable text");
+        Require(rows.Children.Count == countIndex + 2 + snapshot.ResetCredits.Credits.Count && tip.Height > detailHeight, "partial-detail notice participates in content sizing");
+        Require(((TextBlock)rows.Children[rows.Children.Count - 1]).Text == "仅返回 4 / 6 项到期明细", "partial-detail notice is readable text");
         snapshot.ResetCredits.AvailableCount = 0;
         tip.Render(HoverLogic.Content(snapshot, now));
-        Require(rows.Children.Count == 5 && tip.Height < detailHeight, "zero removes all credit details and notice immediately");
+        Require(rows.Children.Count == countIndex + 1 && tip.Height < detailHeight, "zero removes all credit details and notice immediately");
         snapshot.ResetCredits.AvailableCount = 4; snapshot.ResetCredits.LastSuccessUtc = now.AddSeconds(-90);
         tip.Render(HoverLogic.Content(snapshot, now));
-        Require(rows.Children.Count == 5 && ((Run)((TextBlock)rows.Children[4]).Inlines.LastInline).Text == "待更新", "stale section removes old date rows");
+        Require(rows.Children.Count == countIndex + 1 && ((Run)((TextBlock)rows.Children[countIndex]).Inlines.LastInline).Text == "待更新", "stale section removes old date rows");
         snapshot.ResetCredits.LastSuccessUtc = now;
         snapshot.ResetCredits.Credits.Clear();
         for (int i = 0; i < 80; i++) snapshot.ResetCredits.Credits.Add(new ResetCredit { ExpiresAtUtc = now.AddDays(i + 1) });
         snapshot.ResetCredits.AvailableCount = 80;
         tip.Render(HoverLogic.Content(snapshot, now));
-        Require(rows.Children.Count == 85 && tip.MeasuredHeight > 1080, "full content dimensions preserved even if WPF coerces the HWND size");
+        Require(rows.Children.Count == countIndex + 1 + snapshot.ResetCredits.Credits.Count && tip.MeasuredHeight > 1080, "full content dimensions preserved even if WPF coerces the HWND size");
         Require(HoverLogic.Place(new PetAnchor { Visible = true, Left = 300, Top = 500, Width = 160, Height = 174,
             WorkWidth = 1920, WorkHeight = 1080, Dpi = 96 }, tip.MeasuredWidth, tip.MeasuredHeight) == null, "tooltip that cannot fit is hidden rather than overlapping or clipping");
     }

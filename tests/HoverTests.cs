@@ -8,7 +8,7 @@ internal static class HoverTests
 
     public static void Run()
     {
-        ResetContent(); ResetCreditContent(); HitAreas(); Placements(); Dwell(); JumpingPet();
+        ResetContent(); ResetCreditContent(); BalanceContent(); HitAreas(); Placements(); Dwell(); JumpingPet();
         Console.WriteLine("PASS hover/reset logic assertions: " + _checks);
     }
 
@@ -181,6 +181,68 @@ internal static class HoverTests
     {
         Require(content.ResetCreditRows.Count == 1 && content.ResetCreditRows[0].Label == "可用重置" &&
             content.ResetCreditRows[0].Value == value && content.ResetCreditNotice == "", label);
+    }
+
+    private static void BalanceContent()
+    {
+        DateTime now = new DateTime(2026, 10, 20, 12, 0, 0, DateTimeKind.Utc);
+        var snapshot = new QuotaSnapshot { State = "ready", LastSuccessUtc = now,
+            Windows = new List<QuotaWindow> { new QuotaWindow { Label = "本周", ResetsAtUtc = now.AddDays(2) } },
+            ResetCredits = new ResetCreditsSnapshot { AvailableCount = 1, LastSuccessUtc = now, DetailsAvailable = true,
+                Credits = new List<ResetCredit> { new ResetCredit { ExpiresAtUtc = now.AddDays(5) } } } };
+        RequireBalance(HoverLogic.Content(snapshot, now), "暂不可用", "missing balance is unknown, not zero");
+        RequireBalance(HoverLogic.Content(null, now), "暂不可用", "no snapshot leaves explicit balance placeholder");
+        var balance = new CreditBalanceSnapshot { Balance = 12345.6789m, LastSuccessUtc = now };
+        snapshot.CreditBalance = balance;
+        RequireBalance(HoverLogic.Content(snapshot, now), "12,345.68", "decimal balance rounded only for display");
+        Require(balance.Balance == 12345.6789m, "formatting leaves exact stored decimal unchanged");
+        var previousCulture = System.Threading.Thread.CurrentThread.CurrentCulture;
+        try
+        {
+            System.Threading.Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+            RequireBalance(HoverLogic.Content(snapshot, now), "12,345.68", "balance separators independent of machine culture");
+        }
+        finally { System.Threading.Thread.CurrentThread.CurrentCulture = previousCulture; }
+        balance.Balance = 12000m;
+        RequireBalance(HoverLogic.Content(snapshot, now), "12,000", "integer balance omits fractional zeros");
+        balance.Balance = 1234.50m;
+        RequireBalance(HoverLogic.Content(snapshot, now), "1,234.5", "trailing decimal zero omitted");
+        balance.Balance = 0m;
+        RequireBalance(HoverLogic.Content(snapshot, now), "0", "zero is displayed as a valid balance");
+        balance.Balance = Decimal.MaxValue;
+        RequireBalance(HoverLogic.Content(snapshot, now), "79,228,162,514,264,337,593,543,950,335", "large balance retains decimal integer precision");
+        balance.Balance = -1m;
+        RequireBalance(HoverLogic.Content(snapshot, now), "暂不可用", "negative balance is invalid");
+        balance.Balance = null;
+        RequireBalance(HoverLogic.Content(snapshot, now), "暂不可用", "null balance is not inferred as zero");
+        balance.Unlimited = true;
+        RequireBalance(HoverLogic.Content(snapshot, now), "不限量", "unlimited does not need numeric balance");
+        balance.Unlimited = false; balance.Balance = 42.25m;
+        balance.LastSuccessUtc = now.AddSeconds(-89);
+        RequireBalance(HoverLogic.Content(snapshot, now), "42.25", "balance remains fresh before ninety seconds");
+        balance.LastSuccessUtc = now.AddSeconds(-90);
+        var content = HoverLogic.Content(snapshot, now);
+        RequireBalance(content, "待更新", "balance becomes stale independently at ninety seconds");
+        Require(content.Rows.Count == 1 && content.ResetCreditRows.Count == 2, "stale balance leaves fresh period and reset-credit details intact");
+        balance.LastSuccessUtc = now.AddSeconds(-300);
+        RequireBalance(HoverLogic.Content(snapshot, now), "离线", "offline balance never displays an old numeric value");
+        balance.LastSuccessUtc = now; snapshot.LastSuccessUtc = now.AddSeconds(-300);
+        RequireBalance(HoverLogic.Content(snapshot, now), "42.25", "fresh balance survives independently stale quota");
+        snapshot.State = "login_required";
+        RequireBalance(HoverLogic.Content(snapshot, now), "请登录 Codex", "login failure hides old numeric balance");
+        snapshot.State = "ready"; snapshot.LastSuccessUtc = now; balance.LastSuccessUtc = null;
+        RequireBalance(HoverLogic.Content(snapshot, now), "暂不可用", "value without read time is unavailable");
+        balance.LastSuccessUtc = now;
+        content = HoverLogic.Content(snapshot, now);
+        RequireBalance(content, "42.25", "recovery displays the current balance");
+        Require(content.Rows.Count == 1 && content.ResetCreditRows.Count == 2 && content.ResetCreditNotice == "",
+            "balance adds no expiration row or unavailable-expiry notice");
+        Require(content.ResetCreditRows[1].Label == "第1次到期", "existing reset-credit expiry remains distinct");
+    }
+
+    private static void RequireBalance(HoverContent content, string value, string label)
+    {
+        Require(content.BalanceRow != null && content.BalanceRow.Label == "剩余额度" && content.BalanceRow.Value == value, label);
     }
 
     private static void HitAreas()

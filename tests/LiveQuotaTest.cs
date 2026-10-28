@@ -14,6 +14,9 @@ internal static class LiveQuotaTest
             if (!ready.WaitOne(45000) || service.Current.State != "ready") { Console.Error.WriteLine("Live quota read failed: " + service.Current.State); return 1; }
             Console.WriteLine("Live quota read succeeded. This opt-in check uses your current CLI account.");
             foreach (var window in service.Current.Windows) Console.WriteLine(window.Label + ": " + OverlayLogic.Percentage(window.RemainingPercent) + "; reset (UTC): " + window.ResetsAtUtc);
+            var balance = service.Current.CreditBalance;
+            Console.WriteLine("Remaining credit balance: " + (balance == null ? "unavailable" : balance.Unlimited ? "unlimited" :
+                balance.Balance.HasValue ? balance.Balance.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "unavailable"));
             var credits = service.Current.ResetCredits;
             Console.WriteLine("Available reset credits: " + (credits != null && credits.AvailableCount.HasValue ? credits.AvailableCount.Value.ToString() : "unavailable"));
             if (credits != null && credits.Credits != null)

@@ -59,6 +59,7 @@ namespace CodexQuotaPet
         {
             string key = content.Title + "\n" + content.Status;
             foreach (HoverRow row in content.Rows) key += "\n" + row.Label + "\t" + row.Value;
+            if (content.BalanceRow != null) key += "\n--balance--" + content.BalanceRow.Label + "\t" + content.BalanceRow.Value;
             key += "\n--credits--";
             foreach (HoverRow row in content.ResetCreditRows) key += "\n" + row.Label + "\t" + row.Value;
             key += "\n" + content.ResetCreditNotice;
@@ -74,6 +75,7 @@ namespace CodexQuotaPet
                 _rows.Children.Add(new TextBlock { Text = content.Status, TextWrapping = TextWrapping.NoWrap });
             AddRows(content.Rows);
             _rows.Children.Add(new Border { Height = 1, Background = Brush("#46505F"), Margin = new Thickness(0, 8, 0, 6) });
+            if (content.BalanceRow != null) AddRow(content.BalanceRow);
             AddRows(content.ResetCreditRows);
             if (!String.IsNullOrEmpty(content.ResetCreditNotice))
                 _rows.Children.Add(new TextBlock { Text = content.ResetCreditNotice, Foreground = Brush("#B9C5D6"),
@@ -94,13 +96,15 @@ namespace CodexQuotaPet
 
         private void AddRows(System.Collections.Generic.List<HoverRow> rows)
         {
-            foreach (HoverRow row in rows)
-            {
-                var text = new TextBlock { TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(0, 2, 0, 0) };
-                text.Inlines.Add(new Run(row.Label + "："));
-                text.Inlines.Add(new Run(row.Value) { FontWeight = FontWeights.Bold });
-                _rows.Children.Add(text);
-            }
+            foreach (HoverRow row in rows) AddRow(row);
+        }
+
+        private void AddRow(HoverRow row)
+        {
+            var text = new TextBlock { TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(0, 2, 0, 0) };
+            text.Inlines.Add(new Run(row.Label + "："));
+            text.Inlines.Add(new Run(row.Value) { FontWeight = FontWeights.Bold });
+            _rows.Children.Add(text);
         }
     }
 }

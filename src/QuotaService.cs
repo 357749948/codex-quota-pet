@@ -28,6 +28,7 @@ namespace CodexQuotaPet
         public string Error;
         public string PlanType;
         public ResetCreditsSnapshot ResetCredits;
+        public CreditBalanceSnapshot CreditBalance;
     }
 
     // The one worker owns the protocol, its child process, and every refresh.
@@ -430,6 +431,9 @@ namespace CodexQuotaPet
             _selectedLimitId = limitId ?? _selectedLimitId;
             QuotaSnapshot updated = SnapshotFromBucket(merged, _planType, DateTime.UtcNow);
             updated.ResetCredits = Current.ResetCredits;
+            // A quota-only event cannot renew an older balance's freshness.
+            // An explicit credits object (or null) replaces that balance.
+            if (!incoming.ContainsKey("credits")) updated.CreditBalance = Current.CreditBalance;
             Publish(updated);
             // These events contain quota windows, not reset-credit details.
             // Only a complete read may reset its polling or retry schedule.
@@ -446,6 +450,7 @@ namespace CodexQuotaPet
                 // even if its quota bucket is temporarily unavailable.
                 QuotaSnapshot previous = Current;
                 previous.ResetCredits = credits;
+                previous.CreditBalance = CreditBalances.Parse(null, now);
                 Publish(previous);
                 throw new SourceFailure("error", "暂无额度信息");
             }
@@ -674,7 +679,8 @@ namespace CodexQuotaPet
                 Windows = windows,
                 LastSuccessUtc = updatedAt,
                 State = "ready",
-                PlanType = GetString(bucket, "planType") ?? planType
+                PlanType = GetString(bucket, "planType") ?? planType,
+                CreditBalance = CreditBalances.Parse(Get(bucket, "credits"), updatedAt)
             };
         }
 
@@ -731,7 +737,8 @@ namespace CodexQuotaPet
                 State = snapshot.State,
                 Error = snapshot.Error,
                 PlanType = snapshot.PlanType,
-                ResetCredits = ResetCredits.Copy(snapshot.ResetCredits)
+                ResetCredits = ResetCredits.Copy(snapshot.ResetCredits),
+                CreditBalance = CreditBalances.Copy(snapshot.CreditBalance)
             };
         }
 
@@ -783,6 +790,7 @@ namespace CodexQuotaPet
 
         public static void RunSelfTests()
         {
+            RunCreditBalanceSelfTests();
             RunResetCreditSelfTests();
             Assert(!FullyQualifiedPath("C:codex.exe") && !FullyQualifiedPath(@"\codex.exe") && !FullyQualifiedPath("codex.exe"), "relative executable paths rejected");
             Assert(FullyQualifiedPath(@"C:\tools\codex.exe") && FullyQualifiedPath(@"\\server\tools\codex.exe"), "qualified executable paths accepted");
@@ -900,6 +908,90 @@ namespace CodexQuotaPet
                 service.HandleNotification(AsObject(json.DeserializeObject(
                     "{\"method\":\"account/updated\",\"params\":{\"authMode\":\"apikey\"}}")));
                 Assert(service.Current.State == "login_required" && service.Current.Error == "请使用 ChatGPT 账户登录", "unsupported login mode is explicit");
+            }
+        }
+
+        private static void RunCreditBalanceSelfTests()
+        {
+            DateTime now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var json = new JavaScriptSerializer();
+            var balanceObject = AsObject(json.DeserializeObject("{\"hasCredits\":true,\"unlimited\":false,\"balance\":\"12345.67890123456789\"}"));
+            CreditBalanceSnapshot parsed = CreditBalances.Parse(balanceObject, now);
+            Assert(parsed.Balance == 12345.67890123456789m && !parsed.Unlimited && parsed.LastSuccessUtc == now,
+                "credit balance keeps invariant decimal precision and independent read time");
+            CultureInfo originalCulture = Thread.CurrentThread.CurrentCulture;
+            try
+            {
+                Thread.CurrentThread.CurrentCulture = new CultureInfo("fr-FR");
+                Assert(CreditBalances.Parse(balanceObject, now).Balance == parsed.Balance, "balance parsing ignores local decimal separator");
+            }
+            finally { Thread.CurrentThread.CurrentCulture = originalCulture; }
+            foreach (object bad in new object[] { null, "", "invalid", "-1", "NaN", "Infinity", "1,234.56", "1,5", "1e3", "79228162514264337593543950336", true, 7, Double.NaN })
+            {
+                CreditBalanceSnapshot invalid = CreditBalances.Parse(new Dictionary<string, object> { { "balance", bad } }, now);
+                Assert(!invalid.Balance.HasValue && !invalid.Unlimited && !invalid.LastSuccessUtc.HasValue,
+                    "invalid balance is unknown rather than zero");
+            }
+            Assert(!CreditBalances.Parse(null, now).Balance.HasValue &&
+                !CreditBalances.Parse(new Dictionary<string, object> { { "hasCredits", false } }, now).Balance.HasValue,
+                "absent balance and hasCredits false are not inferred as zero");
+            CreditBalanceSnapshot zero = CreditBalances.Parse(new Dictionary<string, object> { { "balance", "0.0000" } }, now);
+            Assert(zero.Balance == 0 && zero.LastSuccessUtc == now, "explicit zero balance is valid");
+            CreditBalanceSnapshot unlimited = CreditBalances.Parse(new Dictionary<string, object> { { "unlimited", true }, { "balance", null } }, now);
+            Assert(unlimited.Unlimited && !unlimited.Balance.HasValue && unlimited.LastSuccessUtc == now, "unlimited does not need numeric balance");
+            Assert(!CreditBalances.Parse(new Dictionary<string, object> { { "unlimited", "true" } }, now).Unlimited,
+                "only boolean unlimited is accepted");
+
+            var bucket = AsObject(json.DeserializeObject("{\"limitId\":\"codex\",\"primary\":{\"usedPercent\":25,\"windowDurationMins\":300}}"));
+            bucket["credits"] = balanceObject;
+            var response = new Dictionary<string, object> { { "rateLimits", bucket },
+                { "rateLimitResetCredits", AsObject(json.DeserializeObject("{\"availableCount\":2,\"credits\":[]}")) } };
+            var quotaEvent = AsObject(json.DeserializeObject("{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"primary\":{\"usedPercent\":26}}}}"));
+            using (var service = new QuotaService())
+            {
+                service.ApplyReadResult(response, now);
+                QuotaSnapshot copy = service.Current;
+                copy.CreditBalance.Balance = 999;
+                copy.CreditBalance.LastSuccessUtc = now.AddDays(1);
+                Assert(service.Current.CreditBalance.Balance == parsed.Balance && service.Current.CreditBalance.LastSuccessUtc == now,
+                    "balance snapshots are independently copied");
+                service._nextAttemptUtc = now.AddSeconds(RefreshIntervalSeconds);
+                service.HandleNotification(quotaEvent);
+                Assert(service.Current.CreditBalance.Balance == parsed.Balance && service.Current.CreditBalance.LastSuccessUtc == now &&
+                    service._nextAttemptUtc == now.AddSeconds(RefreshIntervalSeconds), "quota-only event preserves balance and read deadline");
+                service.HandleNotification(AsObject(json.DeserializeObject("{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"other\",\"credits\":{\"balance\":\"1\"}}}}")));
+                Assert(service.Current.CreditBalance.Balance == parsed.Balance, "unrelated bucket cannot overwrite balance");
+                service.HandleNotification(AsObject(json.DeserializeObject("{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"credits\":{\"balance\":\"42.1250\",\"unlimited\":false}}}}")));
+                DateTime balanceAt = service.Current.CreditBalance.LastSuccessUtc.Value;
+                Assert(service.Current.CreditBalance.Balance == 42.1250m && balanceAt > now &&
+                    service.Current.ResetCredits.AvailableCount == 2 && service.Current.ResetCredits.LastSuccessUtc == now,
+                    "explicit balance event updates balance without refreshing reset-credit data");
+                service.RecordFailure("error", "额度读取暂时失败");
+                Assert(service.Current.CreditBalance.Balance == 42.1250m && service.Current.CreditBalance.LastSuccessUtc == balanceAt,
+                    "failed request retains old balance without renewing freshness");
+                service.HandleNotification(AsObject(json.DeserializeObject("{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"limitId\":\"codex\",\"credits\":null}}}")));
+                Assert(!service.Current.CreditBalance.Balance.HasValue && !service.Current.CreditBalance.LastSuccessUtc.HasValue,
+                    "explicit null balance clears old data");
+                service.ApplyReadResult(response, now.AddSeconds(1));
+                bucket.Remove("credits");
+                service.ApplyReadResult(response, now.AddSeconds(2));
+                Assert(!service.Current.CreditBalance.Balance.HasValue && !service.Current.CreditBalance.LastSuccessUtc.HasValue &&
+                    service.Current.Windows[0].RemainingPercent == 75, "legacy complete response clears balance without suppressing quota");
+                bucket["credits"] = balanceObject;
+                service.ApplyReadResult(response, now.AddSeconds(3));
+                service.RecordFailure("login_required", "请重新登录 Codex");
+                Assert(service.Current.CreditBalance == null, "login failure clears balance");
+            }
+            using (var service = new QuotaService())
+            {
+                var accountA = AsObject(json.DeserializeObject("{\"account\":{\"type\":\"chatgpt\",\"email\":\"a@example.invalid\"}}"));
+                var accountB = AsObject(json.DeserializeObject("{\"account\":{\"type\":\"chatgpt\",\"email\":\"b@example.invalid\"}}"));
+                service.ApplyAccount(accountA); service.ApplyReadResult(response, now); service.ApplyAccount(accountB);
+                Assert(service.Current.CreditBalance == null, "account switch clears balance");
+                service.ApplyReadResult(response, now);
+                try { service.ApplyReadResult(new Dictionary<string, object>(), now.AddSeconds(1)); }
+                catch (SourceFailure) { }
+                Assert(!service.Current.CreditBalance.Balance.HasValue, "missing complete quota bucket clears balance");
             }
         }
 

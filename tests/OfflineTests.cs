@@ -153,6 +153,8 @@ internal static class OfflineTests
                 Require(weekly && shortWindow, "mock exact remaining values");
                 Require(service.Current.ResetCredits != null && service.Current.ResetCredits.AvailableCount == 2 &&
                     service.Current.ResetCredits.Credits.Count == 2, "reset count and details pass through protocol");
+                Require(service.Current.CreditBalance != null && service.Current.CreditBalance.Balance == 12345.6789m,
+                    "credit balance passes through protocol without precision loss");
                 DateTime first = service.Current.LastSuccessUtc.Value;
                 service.SetPetVisible(true);
                 WaitFor(delegate { return service.Current.LastSuccessUtc > first; }, 8000, "visible immediate refresh", service);
@@ -172,10 +174,28 @@ internal static class OfflineTests
                 }
                 DateTime creditSuccess = service.Current.ResetCredits.LastSuccessUtc.Value;
 
+                foreach (string mode in new[] { "balance-zero", "balance-unlimited", "balance-invalid", "balance-missing", "ready" })
+                {
+                    DateTime prior = service.Current.LastSuccessUtc.Value;
+                    File.WriteAllText(controlPath, mode); service.Refresh();
+                    WaitFor(delegate { return service.Current.LastSuccessUtc > prior; }, 8000, "balance protocol mode " + mode, service);
+                    CreditBalanceSnapshot balance = service.Current.CreditBalance;
+                    Require(service.Current.Windows.Count == 2 && service.Current.ResetCredits.AvailableCount == 2,
+                        "balance state preserves quota and reset credits");
+                    if (mode == "balance-zero") Require(balance.Balance == 0m && !balance.Unlimited, "zero balance is known");
+                    if (mode == "balance-unlimited") Require(balance.Unlimited, "unlimited balance is explicit");
+                    if (mode == "balance-invalid" || mode == "balance-missing") Require(balance == null || !balance.LastSuccessUtc.HasValue,
+                        "missing or malformed balance clears stale numeric value");
+                    if (mode == "ready") Require(balance.Balance == 12345.6789m, "balance recovery after unavailable data");
+                }
+                creditSuccess = service.Current.ResetCredits.LastSuccessUtc.Value;
+                DateTime balanceSuccess = service.Current.CreditBalance.LastSuccessUtc.Value;
+
                 File.WriteAllText(controlPath, "http-error"); service.Refresh();
                 WaitFor(delegate { return service.Current.State == "error"; }, 8000, "HTTP failure surfaces", service);
                 Require(service.Current.LastSuccessUtc.HasValue, "failure retains old success timestamp");
                 Require(service.Current.ResetCredits.LastSuccessUtc == creditSuccess, "failure does not renew credit freshness");
+                Require(service.Current.CreditBalance.LastSuccessUtc == balanceSuccess, "failure does not renew balance freshness");
                 File.WriteAllText(controlPath, "ready"); service.Refresh();
                 WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "HTTP recovery", service);
 
@@ -193,6 +213,8 @@ internal static class OfflineTests
                 Require(!service.Current.LastSuccessUtc.HasValue, "expired account invalidates cached quota");
                 Require(service.Current.ResetCredits == null || !service.Current.ResetCredits.AvailableCount.HasValue,
                     "expired account invalidates cached reset credits");
+                Require(service.Current.CreditBalance == null || !service.Current.CreditBalance.LastSuccessUtc.HasValue,
+                    "expired account invalidates cached balance");
                 File.WriteAllText(controlPath, "ready"); service.Refresh();
                 WaitFor(delegate { return service.Current.State == "ready"; }, 8000, "login recovery", service);
 
