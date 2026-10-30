@@ -20,20 +20,39 @@ def archive_bytes(content=b"synthetic local asset", extra=None):
     asset = dict(size=len(content), offset="0")
     if extra:
         asset.update(extra)
-    header = dict(files={"webview": {"files": {"assets": {"files": {
-        "null-signal-spritesheet-synthetic.webp": asset}}}}})
+    return archive_with_assets({"null-signal-spritesheet-synthetic.webp": asset}, content)
+
+
+def archive_with_assets(assets, content):
+    header = dict(files={"webview": {"files": {"assets": {"files": assets}}}})
     raw = json.dumps(header, separators=(",", ":")).encode()
     padded = (len(raw) + 3) & ~3
     header_size = padded + 8
     return struct.pack("<4I", 4, header_size, header_size - 4, len(raw)) + raw + b"\0" * (padded - len(raw)) + content
 
 
+def archive_entries(entries):
+    assets, payload = {}, bytearray()
+    for name, content, extra in entries:
+        item = dict(size=len(content), offset=str(len(payload)))
+        item.update(extra)
+        assets[name] = item
+        payload.extend(content)
+    return archive_with_assets(assets, bytes(payload))
+
+
+def synthetic_webp(color):
+    output = io.BytesIO()
+    Image.new("RGB", (3, 2), color).save(output, format="WEBP", lossless=True)
+    return output.getvalue()
+
+
 class ArchiveTests(unittest.TestCase):
-    def read(self, data):
+    def read(self, data, expected_hash=None):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "app.asar"
             path.write_bytes(data)
-            return asar.read_sprite(path)
+            return asar.read_sprite(path, expected_hash=expected_hash)
 
     def test_reads_only_requested_entry(self):
         name, content = self.read(archive_bytes())
@@ -49,6 +68,78 @@ class ArchiveTests(unittest.TestCase):
         for extra in ({"link": "other.webp"}, {"unpacked": True}):
             with self.subTest(extra=extra), self.assertRaises(ValueError):
                 self.read(archive_bytes(extra=extra))
+
+    def test_hashed_name_uses_supported_content_not_filename(self):
+        content = synthetic_webp("#28517a")
+        other = synthetic_webp("#8f6231")
+        data = archive_entries([
+            ("111111111111.webp", other, {}),
+            ("222222222222.webp", content, {}),
+            ("333333333333.webp", other, {}),
+        ])
+        expected = hashlib.sha256(content).hexdigest()
+        self.assertEqual(self.read(data, expected), ("222222222222.webp", content))
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            self.read(data, hashlib.sha256(b"unsupported synthetic sprite").hexdigest())
+
+    def test_named_entry_retains_precedence_and_unique_requirement(self):
+        content = synthetic_webp("#28517a")
+        expected = hashlib.sha256(content).hexdigest()
+        named = "null-signal-spritesheet-synthetic.webp"
+        data = archive_entries([(named, b"named but not compatible", {}), ("123abc.webp", content, {})])
+        self.assertEqual(self.read(data, expected), (named, b"named but not compatible"))
+        # A caller must still perform the existing fingerprint validation;
+        # fallback cannot silently substitute a different image for a named one.
+        data = archive_entries([(named, content, {}), ("null-signal-spritesheet-other.webp", content, {})])
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            self.read(data, expected)
+
+    def test_duplicate_fingerprint_rejected(self):
+        content = synthetic_webp("#28517a")
+        data = archive_entries([("111.webp", content, {}), ("222.webp", content, {})])
+        with self.assertRaisesRegex(ValueError, "Ambiguous"):
+            self.read(data, hashlib.sha256(content).hexdigest())
+
+    def test_hashed_scan_skips_nonregular_entries(self):
+        content = synthetic_webp("#28517a")
+        data = archive_entries([
+            ("link.webp", content, {"link": "222.webp"}),
+            ("external.webp", content, {"unpacked": True}),
+            ("directory.webp", content, {"files": {}}),
+            ("ignored.png", content, {}),
+            ("222.webp", content, {}),
+        ])
+        self.assertEqual(self.read(data, hashlib.sha256(content).hexdigest()), ("222.webp", content))
+
+    def test_hashed_scan_validates_ranges_before_reading(self):
+        content = synthetic_webp("#28517a")
+        expected = hashlib.sha256(content).hexdigest()
+        invalid = ({"offset": "-1"}, {"offset": "1.5"}, {"offset": 0},
+                   {"offset": "999999"}, {"size": 0}, {"size": True},
+                   {"size": asar.MAX_ASSET + 1})
+        for extra in invalid:
+            data = archive_entries([("111.webp", content, {}), ("222.webp", content, extra)])
+            with self.subTest(extra=extra), mock.patch.object(asar, "_read_entry") as read:
+                with self.assertRaises(ValueError):
+                    self.read(data, expected)
+                read.assert_not_called()
+        with self.assertRaisesRegex(ValueError, "bounds"):
+            self.read(archive_entries([("111.webp", content, {})])[:-1], expected)
+
+    def test_hashed_scan_limits_before_payload_reads(self):
+        expected = hashlib.sha256(b"x").hexdigest()
+        assets = {"%04d.webp" % index: dict(size=1, offset="0") for index in range(asar.MAX_SCAN_ASSETS + 1)}
+        # ASAR entries may share a byte range. Bounds still limit work even when
+        # the actual archive stays small and a matching entry appears first.
+        cases = [archive_with_assets(assets, b"x")]
+        assets = {"%02d.webp" % index: dict(size=asar.MAX_ASSET, offset="0")
+                  for index in range(asar.MAX_SCAN_BYTES // asar.MAX_ASSET + 1)}
+        cases.append(archive_with_assets(assets, b"\0" * asar.MAX_ASSET))
+        for data in cases:
+            with self.subTest(archive_size=len(data)), mock.patch.object(asar, "_read_entry") as read:
+                with self.assertRaisesRegex(ValueError, "scan limit"):
+                    self.read(data, expected)
+                read.assert_not_called()
 
     def test_archive_discovery(self):
         with tempfile.TemporaryDirectory() as temporary:

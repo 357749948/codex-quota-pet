@@ -4,7 +4,7 @@
 
 在 Codex 的 **Null Signal** 宠物脸部屏幕中显示剩余额度，用清晰的大字百分比覆盖原来的文字。显示层跟随宠物，鼠标可穿透，窗口按不激活、不获取键盘焦点的方式创建；难以可靠识别的动画帧会恢复原画面。实际验证范围见[兼容性记录](docs/compatibility.md)。
 
-这是非 OpenAI 官方项目，与 OpenAI 无隶属或背书关系。当前 `main` 源码版本为 **1.5.0**，包含悬停查看额度余额、周期重置时间、可用重置次数及逐条到期时间，保持每分钟刷新；[已发布的 v1.2.0](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) 不含这些更新。两者均需自行构建；仓库不分发从 Codex 提取的素材原图、识别模板或可执行文件。
+这是非 OpenAI 官方项目，与 OpenAI 无隶属或背书关系。当前 `main` 源码版本为 **1.5.1**，兼容新版 Codex 对相同宠物素材的重命名，包含悬停查看额度余额、周期重置时间、可用重置次数及逐条到期时间，保持每分钟刷新；[已发布的 v1.2.0](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) 不含这些更新。两者均需自行构建；仓库不分发从 Codex 提取的素材原图、识别模板或可执行文件。
 
 ## 实际效果
 
@@ -31,7 +31,7 @@
 
 ## 从源码运行
 
-克隆仓库的 `main` 分支或下载该分支的源码归档，可构建含余额及重置明细提示的 1.5.0；旧版本 Release 中的归档仍对应其发布版本。在仓库根目录打开 PowerShell。以下命令的 `ExecutionPolicy Bypass` 只作用于该次 PowerShell 进程，不修改系统策略。
+克隆仓库的 `main` 分支或下载该分支的源码归档，可构建含余额及重置明细提示、兼容素材重命名的 1.5.1；旧版本 Release 中的归档仍对应其发布版本。在仓库根目录打开 PowerShell。以下命令的 `ExecutionPolicy Bypass` 只作用于该次 PowerShell 进程，不修改系统策略。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
@@ -100,6 +100,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Uninstall.ps1
 ## 模板与更新
 
 识别模板仅在本机生成，缓存位于 `%LOCALAPPDATA%\CodexQuotaPetData\cache`。模板包含素材指纹、生成器版本和格式版本。当前只支持已验证的 Null Signal 素材指纹；**相同宠物名称并不意味着任意 Codex 版本都兼容**。
+
+1.5.1 同时支持旧素材文件名，以及新版 Codex 将文件名改为哈希值的布局。找不到旧文件名时，程序和模板生成器在有限范围内按已支持的 SHA-256 精确查找相同素材；不会把重命名当作允许使用任意新素材。若素材内容未变，现有模板仍可使用。
 
 Codex 更新后若提示模板缺失或不匹配，重新执行 `prepare-templates.ps1`。显示层会自动重新读取缓存，也可以退出后重启。如果生成器提示素材未支持，需要等待兼容性更新；不要强行修改指纹或继续使用旧模板。
 

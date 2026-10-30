@@ -11,6 +11,22 @@ The initial compatibility baseline is Codex desktop package **26.928.4866.0**. T
 
 Only one unambiguous visible pet is supported. Extreme perspective/glitch frames intentionally restore the original image. Other pets, macOS/Linux, ARM64, and headless/service sessions are outside the initial target.
 
+## v1.5.1 renamed-asset compatibility
+
+Codex desktop package **26.1027.3384.0** uses hashed asset filenames instead of the previous `null-signal-spritesheet-*.webp` name. The locally observed Null Signal asset still has the supported SHA-256 above and the same 1536 × 2288 sprite-sheet dimensions. The 1.5.0 overlay could locate the pet and read quota, but its filename-based asset lookup failed before loading the existing template cache.
+
+Version 1.5.1 preserves legacy-name lookup and adds a bounded fingerprint search when that name is absent. The C# runtime and Python generator accept only the existing supported content hash, require a unique match, retain packed-entry/range validation, and limit the fallback to 4,096 WebP candidates and 128 MiB of asset data. The supported fingerprint, template format and generation algorithm are unchanged; artwork and generated templates remain local. This update does not create a new release tag or binary distribution.
+
+| Check | Status |
+| --- | --- |
+| Updated local asset identity | Verified on 2026-10-30: the renamed asset in package 26.1027.3384.0 has the existing supported fingerprint and dimensions; the pre-existing cache is present |
+| Legacy and hashed-name lookup, ambiguity and scan bounds | Passed: synthetic C# ASAR checks, 15 Python tests, archive-failure retry checks and the existing offline C# suite (326 hover assertions plus 101 additional assertions) |
+| Local template generation and existing-cache compatibility | Passed: generation from the updated installation returned 74 frames / 46 supported frames; the regenerated cache was byte-for-byte identical to the prior cache |
+| Live percentage, tooltip, animation and passive-window behavior | Passed on 2026-10-30 at 200% scaling: actual percentage and tooltip were visually inspected; 14 desktop checks passed, including current data, asset recognition, work-area/pet separation, pass-through messages, foreground retention and 39 stable stationary-hover samples |
+| Backed-up upgrade, startup choice and duplicate launch | Passed: verified the 1.5.0 backup, installed the tested 1.5.1 executable, observed template-ready and visible-overlay state, retained enabled startup and confirmed duplicate launch leaves one instance |
+| GitHub Windows automated checks | The Windows workflow builds and runs the complete offline suite for each main update; see the [current workflow results](https://github.com/357749948/codex-quota-pet/actions/workflows/ci.yml) |
+| Changed artwork, lock/unlock, restart, sleep/resume and mixed-DPI cross-monitor movement | Not yet physically verified for v1.5.1; changed artwork remains unsupported |
+
 ## v1.5.0 remaining credit balance
 
 Version 1.5.0 adds a “剩余额度” row after the quota-reset divider and before reset-credit details. It reads the selected bucket's `credits.balance` from the existing app-server response and formats it with thousands separators and up to two decimal places, without a currency symbol. Zero, unlimited credit and unavailable data remain distinct. The interface does not supply the balance's expiration date, so there is no balance-expiration row or placeholder; existing reset-credit expiration rows remain.

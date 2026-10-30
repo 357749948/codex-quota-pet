@@ -39,6 +39,11 @@ namespace CodexQuotaPet
         private static DateTime _nextCheckUtc;
         private static string _archivePath, _sourceHash;
         private static long _archiveLength, _archiveStamp, _cacheLength, _cacheStamp;
+        private static string _failedArchivePath, _archiveFailureStatus;
+        private static long _failedArchiveLength, _failedArchiveStamp;
+        private static DateTime _archiveRetryUtc;
+        private const int MaxSpriteCandidates = 4096;
+        private const long MaxSpriteScanBytes = 128L * 1024 * 1024;
 
         public static string TemplateStatus { get { return _status; } }
         public static bool IsReady { get { return All.Length != 0; } }
@@ -66,17 +71,38 @@ namespace CodexQuotaPet
                     string archive = Path.Combine(Path.GetDirectoryName(executable), "resources", "app.asar");
                     FileInfo info = new FileInfo(archive);
                     if (!info.Exists) { Clear("找不到当前 Codex 的宠物素材"); return false; }
+                    if (!CanRetryArchive(archive, info.Length, info.LastWriteTimeUtc.Ticks, now))
+                    { Clear(_archiveFailureStatus); return false; }
                     if (!String.Equals(_archivePath, archive, StringComparison.OrdinalIgnoreCase) ||
                         _archiveLength != info.Length || _archiveStamp != info.LastWriteTimeUtc.Ticks || _sourceHash == null)
                     {
                         Clear("正在验证宠物模板");
-                        byte[] content;
-                        using (FileStream stream = new FileStream(archive, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                            content = ReadSprite(stream);
-                        _sourceHash = Sha256(content);
+                        _sourceHash = null;
+                        try
+                        {
+                            byte[] content;
+                            using (FileStream stream = new FileStream(archive, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                                content = ReadSprite(stream);
+                            string hash = Sha256(content);
+                            if (hash != SupportedHash)
+                            {
+                                RememberArchiveFailure(archive, info.Length, info.LastWriteTimeUtc.Ticks, now,
+                                    "当前宠物素材尚未适配，请等待兼容性更新");
+                                return false;
+                            }
+                            _sourceHash = hash;
+                        }
+                        catch (Exception)
+                        {
+                            RememberArchiveFailure(archive, info.Length, info.LastWriteTimeUtc.Ticks, now,
+                                "宠物素材定位失败：请更新兼容性支持");
+                            return false;
+                        }
                         _archivePath = archive;
                         _archiveLength = info.Length;
                         _archiveStamp = info.LastWriteTimeUtc.Ticks;
+                        _failedArchivePath = null;
+                        _archiveFailureStatus = null;
                     }
                     if (_sourceHash != SupportedHash) { Clear("当前宠物素材尚未适配，请等待兼容性更新"); return false; }
                     string cache = Path.Combine(CacheDirectory, "templates-" + _sourceHash + ".json");
@@ -107,6 +133,19 @@ namespace CodexQuotaPet
                     return false;
                 }
             }
+        }
+
+        private static bool CanRetryArchive(string path, long length, long stamp, DateTime now)
+        {
+            return !String.Equals(_failedArchivePath, path, StringComparison.OrdinalIgnoreCase) ||
+                _failedArchiveLength != length || _failedArchiveStamp != stamp || now >= _archiveRetryUtc;
+        }
+
+        private static void RememberArchiveFailure(string path, long length, long stamp, DateTime now, string status)
+        {
+            _failedArchivePath = path; _failedArchiveLength = length; _failedArchiveStamp = stamp;
+            _archiveRetryUtc = now.AddSeconds(30); _archiveFailureStatus = status;
+            Clear(status);
         }
 
         private static void Clear(string status) { All = new ScreenFrame[0]; _status = status; }
@@ -204,7 +243,11 @@ namespace CodexQuotaPet
             return frames.ToArray();
         }
 
-        private static byte[] ReadSprite(Stream stream)
+        private static byte[] ReadSprite(Stream stream) { return ReadSprite(stream, SupportedHash); }
+
+        // expectedHash permits original synthetic test payloads. Production
+        // always supplies the unchanged supported artwork fingerprint above.
+        internal static byte[] ReadSprite(Stream stream, string expectedHash)
         {
             using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
             {
@@ -224,23 +267,61 @@ namespace CodexQuotaPet
                     if (asset != null) throw new InvalidDataException("Ambiguous sprite");
                     asset = Map(pair.Value);
                 }
-                if (asset == null || asset.ContainsKey("link") || (asset.ContainsKey("unpacked") && !Object.Equals(asset["unpacked"], false)))
-                    throw new InvalidDataException("Packed sprite missing");
-                int length = Number(asset["size"], 1, 8 * 1024 * 1024);
-                long offset;
-                if (!(asset["offset"] is string) || !Int64.TryParse((string)asset["offset"], NumberStyles.None, CultureInfo.InvariantCulture, out offset) || offset < 0)
-                    throw new InvalidDataException("Sprite offset");
-                long absolute = checked(8L + headerSize + offset);
-                if (absolute > stream.Length - length) throw new InvalidDataException("Sprite exceeds archive bounds");
-                stream.Position = absolute;
-                byte[] content = reader.ReadBytes(length);
-                if (content.Length != length) throw new InvalidDataException("Truncated sprite");
-                return content;
+                // Keep the legacy named path strict and unique. Only releases
+                // without that name use bounded content-based discovery.
+                if (asset != null) return ReadAsset(reader, AssetRange(asset, headerSize, stream.Length));
+                var candidates = new List<AsarAssetRange>();
+                long totalBytes = 0;
+                foreach (var pair in files)
+                {
+                    if (!pair.Key.EndsWith(".webp", StringComparison.Ordinal)) continue;
+                    IDictionary<string, object> candidate = Map(pair.Value);
+                    if (candidate.ContainsKey("link") || candidate.ContainsKey("files") ||
+                        (candidate.ContainsKey("unpacked") && !Object.Equals(candidate["unpacked"], false))) continue;
+                    if (candidates.Count >= MaxSpriteCandidates) throw new InvalidDataException("Too many sprite candidates");
+                    AsarAssetRange range = AssetRange(candidate, headerSize, stream.Length);
+                    totalBytes += range.Length;
+                    if (totalBytes > MaxSpriteScanBytes) throw new InvalidDataException("Sprite scan exceeds byte budget");
+                    candidates.Add(range);
+                }
+                byte[] found = null;
+                foreach (AsarAssetRange range in candidates)
+                {
+                    byte[] content = ReadAsset(reader, range);
+                    if (!String.Equals(Sha256(content), expectedHash, StringComparison.Ordinal)) continue;
+                    if (found != null) throw new InvalidDataException("Ambiguous sprite fingerprint");
+                    found = content;
+                }
+                if (found == null) throw new InvalidDataException("Supported sprite fingerprint missing");
+                return found;
             }
+        }
+
+        private sealed class AsarAssetRange { public long Offset; public int Length; }
+        private static AsarAssetRange AssetRange(IDictionary<string, object> asset, uint headerSize, long archiveLength)
+        {
+            if (asset.ContainsKey("link") || asset.ContainsKey("files") ||
+                (asset.ContainsKey("unpacked") && !Object.Equals(asset["unpacked"], false)))
+                throw new InvalidDataException("Sprite must be a packed regular entry");
+            int length = Number(asset["size"], 1, 8 * 1024 * 1024);
+            long offset;
+            if (!(asset["offset"] is string) || !Int64.TryParse((string)asset["offset"], NumberStyles.None, CultureInfo.InvariantCulture, out offset) || offset < 0)
+                throw new InvalidDataException("Sprite offset");
+            long absolute = checked(8L + headerSize + offset);
+            if (absolute > archiveLength - length) throw new InvalidDataException("Sprite exceeds archive bounds");
+            return new AsarAssetRange { Offset = absolute, Length = length };
+        }
+        private static byte[] ReadAsset(BinaryReader reader, AsarAssetRange range)
+        {
+            reader.BaseStream.Position = range.Offset;
+            byte[] content = reader.ReadBytes(range.Length);
+            if (content.Length != range.Length) throw new InvalidDataException("Truncated sprite");
+            return content;
         }
 
         public static void RunSelfTests()
         {
+            RunAsarSelfTests();
             // These fixtures are hand-built rectangles and color ramps, independent
             // of the installed app, local cache, account, and third-party artwork.
             var samples = new List<int[]>();
@@ -265,6 +346,125 @@ namespace CodexQuotaPet
             ExpectInvalid(delegate { ParseDocument(Serializer().Serialize(doc), "synthetic"); });
             using (var empty = new MemoryStream(new byte[16])) ExpectInvalid(delegate { ReadSprite(empty); });
         }
+
+        private static void RunAsarSelfTests()
+        {
+            // Arbitrary original bytes are sufficient to test archive lookup;
+            // these are not images or samples from the installed Codex artwork.
+            byte[] payload = new byte[] { 13, 29, 47, 71, 101 };
+            string hash = Sha256(payload);
+            var files = new Dictionary<string, object> {
+                { "null-signal-spritesheet-test.webp", SyntheticAsset(payload.Length, "0") }
+            };
+            using (MemoryStream archive = SyntheticArchive(files, payload))
+                AsarAssert(Sha256(ReadSprite(archive, hash)) == hash, "legacy sprite remains readable");
+            files["abcdef123456.webp"] = SyntheticAsset(payload.Length, "0");
+            using (MemoryStream archive = SyntheticArchive(files, payload))
+                AsarAssert(Sha256(ReadSprite(archive, hash)) == hash, "legacy name takes precedence over anonymous entries");
+            files["null-signal-spritesheet-second.webp"] = SyntheticAsset(payload.Length, "0");
+            ExpectAssetFailure(files, payload, hash, "Ambiguous sprite");
+            files.Remove("null-signal-spritesheet-second.webp");
+            files.Remove("null-signal-spritesheet-test.webp");
+            using (MemoryStream archive = SyntheticArchive(files, payload))
+                AsarAssert(Sha256(ReadSprite(archive, hash)) == hash, "anonymous asset matches exact supported content");
+            ExpectAssetFailure(files, payload, "unmatched-synthetic-fingerprint", "Supported sprite fingerprint missing");
+            files["fedcba654321.webp"] = SyntheticAsset(payload.Length, "0");
+            ExpectAssetFailure(files, payload, hash, "Ambiguous sprite fingerprint");
+            files.Remove("fedcba654321.webp");
+            var range = (Dictionary<string, object>)files["abcdef123456.webp"];
+            range["offset"] = "1";
+            ExpectAssetFailure(files, payload, hash, "Sprite exceeds archive bounds");
+            range["offset"] = "-1";
+            ExpectAssetFailure(files, payload, hash, "Sprite offset");
+            range["offset"] = "0";
+            foreach (string kind in new[] { "unpacked", "link", "files" })
+            {
+                var skipped = SyntheticAsset(payload.Length, "0");
+                skipped[kind] = kind == "unpacked" ? (object)true : kind == "link" ? (object)"another.webp" : new Dictionary<string, object>();
+                files["skip-" + kind + ".webp"] = skipped;
+                using (MemoryStream archive = SyntheticArchive(files, payload))
+                    AsarAssert(Sha256(ReadSprite(archive, hash)) == hash, "anonymous non-regular entries are skipped");
+                files["null-signal-spritesheet-test.webp"] = skipped;
+                ExpectAssetFailure(files, payload, hash, "Sprite must be a packed regular entry");
+                files.Remove("null-signal-spritesheet-test.webp");
+            }
+            // Malformed regular ranges are rejected, and a broken legacy name
+            // cannot silently select a different anonymous entry.
+            files["null-signal-spritesheet-test.webp"] = SyntheticAsset(payload.Length, "1");
+            ExpectAssetFailure(files, payload, hash, "Sprite exceeds archive bounds");
+
+            files.Clear();
+            for (int i = 0; i < MaxSpriteCandidates + 1; i++)
+                files[i.ToString(CultureInfo.InvariantCulture) + ".webp"] = SyntheticAsset(1, "0");
+            ExpectAssetFailure(files, new byte[] { 7 }, hash, "Too many sprite candidates");
+            files.Clear();
+            for (int i = 0; i < 17; i++)
+                files[i.ToString(CultureInfo.InvariantCulture) + ".webp"] = SyntheticAsset(8 * 1024 * 1024, "0");
+            ExpectAssetFailure(files, new byte[8 * 1024 * 1024], hash, "Sprite scan exceeds byte budget");
+
+            string savedPath = _failedArchivePath, savedFailure = _archiveFailureStatus, savedStatus = _status;
+            long savedLength = _failedArchiveLength, savedStamp = _failedArchiveStamp;
+            DateTime savedRetry = _archiveRetryUtc;
+            ScreenFrame[] savedFrames = All;
+            try
+            {
+                DateTime now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                RememberArchiveFailure("synthetic-archive", 100, 200, now, "synthetic failure");
+                AsarAssert(!CanRetryArchive("synthetic-archive", 100, 200, now.AddSeconds(29)), "unchanged failed scan is throttled");
+                AsarAssert(CanRetryArchive("synthetic-archive", 100, 200, now.AddSeconds(30)), "failed scan retries after thirty seconds");
+                AsarAssert(CanRetryArchive("changed-archive", 100, 200, now) &&
+                    CanRetryArchive("synthetic-archive", 101, 200, now) &&
+                    CanRetryArchive("synthetic-archive", 100, 201, now), "changed archive retries without failure delay");
+            }
+            finally
+            {
+                _failedArchivePath = savedPath; _archiveFailureStatus = savedFailure;
+                _failedArchiveLength = savedLength; _failedArchiveStamp = savedStamp;
+                _archiveRetryUtc = savedRetry; _status = savedStatus; All = savedFrames;
+            }
+        }
+
+        private static Dictionary<string, object> SyntheticAsset(int size, string offset)
+        {
+            return new Dictionary<string, object> { { "size", size }, { "offset", offset } };
+        }
+        private static MemoryStream SyntheticArchive(IDictionary<string, object> files, byte[] payload)
+        {
+            object header = new Dictionary<string, object> { { "files", new Dictionary<string, object> {
+                { "webview", new Dictionary<string, object> { { "files", new Dictionary<string, object> {
+                    { "assets", new Dictionary<string, object> { { "files", files } } }
+                } } } }
+            } } };
+            byte[] json = Encoding.UTF8.GetBytes(Serializer().Serialize(header));
+            int padding = (4 - json.Length % 4) % 4;
+            uint headerSize = (uint)(8 + json.Length + padding);
+            var stream = new MemoryStream();
+            using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
+            {
+                writer.Write(4U); writer.Write(headerSize); writer.Write(headerSize - 4); writer.Write((uint)json.Length);
+                writer.Write(json); writer.Write(new byte[padding]); writer.Write(payload);
+            }
+            stream.Position = 0;
+            return stream;
+        }
+        private static void ExpectAssetFailure(IDictionary<string, object> files, byte[] payload, string hash, string expected)
+        {
+            using (MemoryStream archive = SyntheticArchive(files, payload))
+            {
+                try { ReadSprite(archive, hash); }
+                catch (InvalidDataException error)
+                {
+                    if (error.Message == expected) return;
+                    throw new InvalidOperationException("Unexpected ASAR validation failure: " + error.Message);
+                }
+            }
+            throw new InvalidOperationException("Invalid ASAR accepted: " + expected);
+        }
+        private static void AsarAssert(bool condition, string name)
+        {
+            if (!condition) throw new InvalidOperationException("ASAR self-test: " + name);
+        }
+
         private static void ExpectInvalid(Action action)
         {
             bool failed = false;

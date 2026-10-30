@@ -199,7 +199,7 @@ def main():
     parser.add_argument("--codex-path", required=True, help="Desktop install directory, executable or app.asar")
     args = parser.parse_args()
     try:
-        _, content = read_sprite(find_archive(args.codex_path))
+        _, content = read_sprite(find_archive(args.codex_path), expected_hash=next(iter(SUPPORTED_SHA256)))
         document = make_document(content)
         destination = write_cache(document)
         print("Local templates ready: %d frames, %d supported; %s" %

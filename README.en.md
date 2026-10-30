@@ -4,7 +4,7 @@
 
 Display remaining Codex quota as large digits inside the **Null Signal** pet's face screen. The overlay follows the pet and allows mouse input through; its window uses non-activating, non-focusable settings. Unsupported or uncertain animation frames show the original pet instead. See [compatibility](docs/compatibility.md) for the actual validation scope.
 
-This is an unofficial project, not affiliated with or endorsed by OpenAI. The current `main` source version is **1.5.0**, with hover tips for remaining credit balance, quota resets, available reset credits and individual expiration times, retaining one-minute polling; the [published v1.2.0 release](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) does not include these changes. Both require a local build. The repository does not distribute original assets extracted from Codex, recognition templates, or application binaries.
+This is an unofficial project, not affiliated with or endorsed by OpenAI. The current `main` source version is **1.5.1**, supporting renamed but unchanged pet assets in newer Codex builds, with hover tips for remaining credit balance, quota resets, available reset credits and individual expiration times, retaining one-minute polling; the [published v1.2.0 release](https://github.com/357749948/codex-quota-pet/releases/tag/v1.2.0) does not include these changes. Both require a local build. The repository does not distribute original assets extracted from Codex, recognition templates, or application binaries.
 
 ## In use
 
@@ -31,7 +31,7 @@ These separate captures come from earlier desktop validation: the quota display 
 
 ## Build and run
 
-Clone `main` or download its source archive to build 1.5.0 with credit balance and reset-credit details. Archives attached to earlier releases still contain their respective versions. Open PowerShell in the repository root:
+Clone `main` or download its source archive to build 1.5.1 with credit balance, reset-credit details and renamed-asset compatibility. Archives attached to earlier releases still contain their respective versions. Open PowerShell in the repository root:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
@@ -98,6 +98,8 @@ Right-click the tray icon to refresh, inspect details, or quit. Windows may plac
 ## Templates and Codex updates
 
 Templates are generated only on the user's computer under `%LOCALAPPDATA%\CodexQuotaPetData\cache`. They record the asset fingerprint, generator version, and format version. Only the tested Null Signal fingerprint is supported; the same pet name does not imply compatibility with every Codex build.
+
+Version 1.5.1 supports both legacy asset names and newer Codex builds that use hashed filenames. If the legacy name is absent, the application and template generator use a bounded scan to find the exact supported SHA-256. Renaming does not permit arbitrary new artwork, and unchanged assets can continue using the existing template cache.
 
 If a Codex update causes a missing/mismatched-template status, run `prepare-templates.ps1`. The overlay reloads the cache automatically; restarting it is also fine. An unknown asset requires a compatibility update. Do not override fingerprint checks or reuse an incompatible template.
 
