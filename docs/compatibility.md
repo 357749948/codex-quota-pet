@@ -11,6 +11,22 @@ The initial compatibility baseline is Codex desktop package **26.928.4866.0**. T
 
 Only one unambiguous visible pet is supported. Extreme perspective/glitch frames intentionally restore the original image. Other pets, macOS/Linux, ARM64, and headless/service sessions are outside the initial target.
 
+## v1.5.2 companion-label compatibility
+
+Codex desktop package **26.1103.3517.0** exposes the Null Signal image as **“Null Signal 智能伙伴”**. Version 1.5.1 did not recognize that label, so it reported the pet as hidden and paused periodic quota reads. The observed transparent window and image bounds were available; this failure occurred before template initialization rather than during asset lookup.
+
+Version 1.5.2 adds the observed full label to the existing name checks. Window-style filtering, image-node bounds, unique-visible-target selection and supported sprite-fingerprint validation remain in place. This update does not create a new release tag or binary distribution.
+
+| Check | Status |
+| --- | --- |
+| Current local window and image identity | Verified on 2026-11-07: package 26.1103.3517.0 exposes one visible Null Signal image with the newer full label in the expected transparent pet window |
+| New/legacy label recognition and unrelated-name rejection | Passed: exact new label and case variant, legacy simplified/traditional Chinese and English labels; bare companion text, other robots and settings-label suffixes are rejected. Existing C# regressions passed (326 hover assertions and 101 additional assertions) |
+| Live percentage, tooltip data and passive-window behavior | Passed at 200% scaling: actual screen percentage was visually inspected; 14 desktop checks confirmed the new image label, template readiness, current quota/balance/reset text, placement outside the pet, click-through messages, foreground retention and dismissal |
+| Stationary-hover animation stability | Inconclusive for this run because the pointer moved during sampling; no stationary-sample result is claimed. Existing synthetic hover/animation checks passed |
+| Backed-up upgrade, startup choice and duplicate launch | Passed: verified the 1.5.1 backup, installed the tested 1.5.2 executable, confirmed visible pet/overlay and refreshed quota, retained enabled startup and confirmed one running instance |
+| GitHub Windows automated checks | The Windows workflow builds and runs the complete offline suite for each main update; see the [current workflow results](https://github.com/357749948/codex-quota-pet/actions/workflows/ci.yml) |
+| Lock/unlock, restart, sleep/resume and mixed-DPI cross-monitor movement | Not yet physically verified for v1.5.2 |
+
 ## v1.5.1 renamed-asset compatibility
 
 Codex desktop package **26.1027.3384.0** uses hashed asset filenames instead of the previous `null-signal-spritesheet-*.webp` name. The locally observed Null Signal asset still has the supported SHA-256 above and the same 1536 × 2288 sprite-sheet dimensions. The 1.5.0 overlay could locate the pet and read quota, but its filename-based asset lookup failed before loading the existing template cache.

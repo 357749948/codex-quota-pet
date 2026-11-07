@@ -283,7 +283,10 @@ namespace CodexQuotaPet
         private static bool IsPetName(string name)
         {
             if (String.IsNullOrWhiteSpace(name)) return false;
-            return name.IndexOf("宠物", StringComparison.Ordinal) >= 0 ||
+            // Recent desktop builds label this same supported image as a
+            // companion. Keep the fallback specific to its observed full name.
+            return name.Equals("Null Signal 智能伙伴", StringComparison.OrdinalIgnoreCase) ||
+                name.IndexOf("宠物", StringComparison.Ordinal) >= 0 ||
                 name.IndexOf("寵物", StringComparison.Ordinal) >= 0 ||
                 name.IndexOf("mascot", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 name.Equals("pet", StringComparison.OrdinalIgnoreCase) ||
@@ -318,7 +321,11 @@ namespace CodexQuotaPet
             if (!ValidRectangle(-1920, 20, 160, 174) || ValidRectangle(0, 0, 0, 174) ||
                 ValidRectangle(Double.NaN, 0, 160, 174) || ValidRectangle(0, 0, Double.PositiveInfinity, 174))
                 throw new InvalidOperationException("Pet rectangle validation failed.");
-            if (!IsPetName("Null Signal 宠物") || !IsPetName("Null Signal pet") ||
+            if (!IsPetName("Null Signal 宠物") || !IsPetName("Null Signal 虚拟宠物") ||
+                !IsPetName("Null Signal 寵物") || !IsPetName("Null Signal pet") ||
+                !IsPetName("Null Signal 智能伙伴") || !IsPetName("null signal 智能伙伴") ||
+                IsPetName("智能伙伴") || IsPetName("Other Robot 智能伙伴") ||
+                IsPetName("Null Signal 智能伙伴设置") || IsPetName("Null Signal") ||
                 IsPetName("profile picture") || IsPetName("competitor"))
                 throw new InvalidOperationException("Pet identity validation failed.");
         }
